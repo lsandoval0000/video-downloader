@@ -8,8 +8,12 @@ and runtime subtitle loading, plus Qt-layer keyboard shortcuts.
 Critical constraints honoured here (see ``.aiw/plan.md`` "Known Gotchas"):
 
 * **Native-window timing** — ``winId()`` is only valid once the container has a
-  native window. We set ``WA_DontCreateNativeAncestors`` + ``WA_NativeWindow`` and
-  call ``winId()`` from :meth:`showEvent`, i.e. only *after* the first show.
+  native window. We set ``WA_NativeWindow`` on the container and call ``winId()``
+  from :meth:`showEvent`, i.e. only *after* the first show. We deliberately do
+  **not** set ``WA_DontCreateNativeAncestors``: keeping the ancestors native lets
+  Qt resolve the native child's position relative to real ancestors, so it lands
+  on the player pane instead of being parked at the top-level window origin (the
+  "black rectangle over the URL box" bug — leaf 10.4).
 * **Locale ordering** — ``locale.setlocale(LC_NUMERIC, 'C')`` is enforced globally
   in :mod:`vdl.app` before the first ``mpv.MPV()``; this widget does **not** touch
   the locale, so the ordering guarantee stays in exactly one place.
@@ -91,6 +95,19 @@ class VideoPlayerWidget(QWidget):
         super().showEvent(event)
         self._ensure_player()
 
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt override
+        """Retry deferred libmpv creation once the widget has a real size.
+
+        When the widget is shown before the layout has assigned it a non-zero
+        size, :meth:`_ensure_player` defers (it must not take ``winId()`` yet).
+        The layout's first resize is the cue to create the player. No manual
+        surface geometry re-sync is needed: with the ancestors left native, Qt
+        positions the native child correctly on its own.
+        """
+        super().resizeEvent(event)
+        if self.isVisible():
+            self._ensure_player()
+
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt override
         """Release libmpv cleanly before the widget goes away."""
         self.shutdown()
@@ -112,7 +129,18 @@ class VideoPlayerWidget(QWidget):
         if self._player is not None:
             return
 
-        self._container.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors)
+        # Leaf 10.4: never take ``winId()``/create the native window before the
+        # widget has a real, non-zero size — doing so locks in bogus geometry. A
+        # later resize retries (see :meth:`resizeEvent`).
+        if self.width() <= 0 or self.height() <= 0:
+            log.debug("deferring libmpv creation until the widget has a size")
+            return
+
+        # Leaf 10.4 fix: only ``WA_NativeWindow`` is set. Dropping
+        # ``WA_DontCreateNativeAncestors`` lets Qt keep the ancestors native, so
+        # the native surface is positioned relative to them instead of being
+        # parked at the top-level window origin (the black rectangle over the
+        # URL box). No manual geometry re-sync is required.
         self._container.setAttribute(Qt.WidgetAttribute.WA_NativeWindow)
 
         # winId() is valid now (we are inside/after show); it also forces the
