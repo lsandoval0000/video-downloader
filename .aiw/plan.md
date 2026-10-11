@@ -1,0 +1,787 @@
+# Plan: Portable Windows Desktop Video Downloader (yt-dlp + ffmpeg + embedded libmpv)
+
+> Status: **In progress** · Created 2026-10-11
+> Owner-of-record: planner · Executors: builder / tester / documenter per leaf
+> Deliverable: `.aiw/plan.md` (this file). No application code is written by the planner.
+
+---
+
+## Why
+
+Users need a **light, portable, no-install** Windows app to download video/audio from any site `yt-dlp` supports, preview media instantly, and manage a full workflow (queue, formats, subtitles, sponsor-block, scheduling, history) — without a vendor-locked installer or a browser plugin. Today no single artifact provides *download + play + post-process + schedule* in one portable folder. This plan produces exactly that: a PyInstaller **onedir** folder that runs offline, wraps `yt-dlp`/`ffmpeg`, and embeds a real **libmpv** player. Every one of the **17 requested extras** is mapped to a verifiable leaf (see traceability table).
+
+---
+
+## Success Criteria
+
+- [ ] `dist/VideoDownloader/VideoDownloader.exe` launches on a clean Windows box **with no Python installed** and shows the main window.
+- [ ] Downloading a known short public URL produces a playable file in the user-chosen folder, with progress + speed + ETA shown live.
+- [ ] The downloaded file plays **inside the app** via the embedded libmpv surface (not an external player).
+- [ ] All **17 extras** pass the acceptance matrix in §Validation Loop (L3 matrix), each demonstrated on the frozen build.
+- [ ] `python -m pytest tests/unit -q` passes with ≥ 90 % of engine logic covered by pure-function unit tests.
+- [ ] Portable folder contains `ffmpeg.exe`, `ffprobe.exe`, `libmpv-2.dll`, `deno.exe` inside `_internal\`, and total size is reported and under the documented budget.
+- [ ] `README.md` + `docs/USAGE.md` + `docs/BUILD.md` exist and let a new user run + rebuild without external help.
+- [ ] No `onefile` artifact is produced (explicit requirement); only the onedir folder.
+
+---
+
+## What
+
+**End state:** a folder the user can zip, copy to a USB stick, unzip anywhere (including `C:\Program Files` or a network share), double-click, and use. No registry writes, no installer, no admin rights. All state (settings, presets, history, cookies pointer, logs, download archive) lives in a portable user-data dir (default: `<app folder>\data` in portable mode, fallback `%APPDATA%\VideoDownloader`).
+
+**Technical shape:**
+- **GUI:** PySide6 **Essentials** (Qt6). Native window handle via `winId()` for libmpv embedding.
+- **Download engine:** `yt-dlp` **imported in-process** (`yt_dlp.YoutubeDL`), driven from a `QThread` worker, progress via `progress_hooks` / `postprocessor_hooks`.
+- **Post-processing:** `ffmpeg`/`ffprobe` bundled static GPL builds; exposed to `yt-dlp` via `ffmpeg_location`.
+- **Player:** `libmpv-2.dll` + vendored `python-mpv` (`mpv.py`), embedded into a `QWidget` container.
+- **YouTube JS challenges:** bundle `deno.exe` + `yt-dlp-ejs` data, wired through `js_runtimes={'deno': {'path': <bundled>}}`.
+- **Packaging:** PyInstaller `--onedir --windowed` via a **spec file**, with explicit `add-binary`/`collect-all` and Qt-module exclusions to stay light.
+
+### Extras → Leaf traceability (all 17 required)
+
+| # | Extra | Owner leaf |
+|---|-------|-----------|
+| 1 | Format/quality picker | 2.2 |
+| 2 | Audio-only extraction (mp3/m4a) | 2.4 |
+| 3 | Playlist/channel download | 2.5 |
+| 4 | Batch / multi-URL input | 2.6 |
+| 5 | Download queue + pause/resume | 2.7 |
+| 6 | Progress + speed/ETA | 2.8 |
+| 7 | Clipboard auto-detect | 6.2 |
+| 8 | Subtitles download/embed | 3.1 |
+| 9 | Thumbnail + metadata embed | 3.2 |
+| 10 | SponsorBlock removal | 3.3 |
+| 11 | Cookies / browser import | 4.1 |
+| 12 | Format conversion | 3.4 |
+| 13 | Scheduler | 6.4 |
+| 14 | History via `--download-archive` | 4.2 (engine) + 6.6 (UI) |
+| 15 | Presets | 1.3 (store) + 6.5 (UI) |
+| 16 | Notifications | 6.3 |
+| 17 | Embedded player (libmpv) | 5.1–5.3 |
+
+---
+
+## Context & References
+
+### Documentation & References
+
+```yaml
+# MUST READ — verified 2026-10-11. Include these in the executor's context window.
+- url: https://github.com/jaseg/python-mpv/blob/main/README.rst
+  why: PyQt embedding pattern (wid=, locale ordering, WA_NativeWindow), and Windows DLL
+       location order (PATH → ctypes search → os.path.dirname(mpv.py)).
+
+- url: https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/YoutubeDL.py
+  why: Authoritative option-key reference. Confirmed keys used by this plan:
+       progress_hooks, postprocessor_hooks, outtmpl, paths, format, postprocessors,
+       write(sub|auto)subtitles, subtitleslangs, subtitlesformat, cookiesfrombrowser,
+       download_archive, js_runtimes, ffmpeg_location, quiet, noprogress.
+
+- url: https://github.com/yt-dlp/yt-dlp/blob/master/README.md
+  section: "Embedding examples" + "--sponsorblock-remove" + "--js-runtimes"
+  critical: Postprocessors are dicts keyed by 'key' (FFmpegExtractAudio, EmbedThumbnail,
+       FFmpegMetadata, FFmpegEmbedSubtitle, FFmpegVideoConvertor, SponsorBlock).
+
+- url: https://github.com/yt-dlp/yt-dlp/wiki/ejs
+  section: "External JS Scripts Setup Guide"
+  critical: "Only `deno` is enabled by default. Minimum supported deno version 2.3.0.
+       Download `deno`, NOT `denort`. yt-dlp-ejs is required alongside the runtime."
+
+- url: https://github.com/yt-dlp/yt-dlp/issues/15012
+  why: Announcement — external JS runtime required for FULL YouTube support since
+       yt-dlp 2025.11.12. Without it, format availability is limited/deprecated.
+
+- url: https://pyinstaller.org/en/stable/CHANGES.html
+  critical: PyInstaller 6.15.0 added Python 3.14 support; current line (6.22.x)
+       supports Python 3.8–3.15. Pin pyinstaller>=6.15.
+
+- url: https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip
+  why: Verified static GPL Windows x64 build. Unzips to bin/ffmpeg.exe + bin/ffprobe.exe.
+
+- url: https://github.com/shinchiro/mpv-winbuild-cmake/releases
+  why: Verified source of `mpv-dev-x86_64-<date>-git-<hash>.7z` which contains
+       libmpv-2.dll (use the NON-v3 build for broadest CPU compatibility; v3 needs AVX2).
+```
+
+### Verified environment facts (this machine, 2026-10-11)
+
+```text
+Python installed : 3.14.6  (C:\Program Files\Python314)
+pip              : 26.1.2
+git              : 2.55.0.windows.5
+uv               : NOT INSTALLED  → use venv + pip
+pyinstaller      : NOT INSTALLED  → installed in step 1
+Platform         : Windows (win32)  → PowerShell for all commands
+```
+
+### Verified library compatibility (resolved via PyPI, 2026-10-11)
+
+```text
+PySide6          6.12.0  requires_python >=3.10,<3.16  wheels: cp310-abi3-win_amd64
+PySide6-Essentials 6.12.0 requires_python >=3.10,<3.16 wheels: cp310-abi3-win_amd64
+   → abi3 wheels are forward-compatible → WORKS on Python 3.14.6.
+   → NOTE: PySide6 6.10 did NOT support 3.14 (Qt blog, 2025-10-09: "6.10 supports up to
+     Python 3.13 ... expect to support it in Qt 6.11"). Use >=6.11; prefer 6.12.
+'python-mpv'     1.0.8  (PyPI name `mpv`) — single-file pure-ctypes mpv.py, no wheels, sdist only.
+'yt-dlp'         2026.8.19  requires_python >=3.10
+'yt-dlp-ejs'     0.8.0      requires_python >=3.10  (JS challenge solver data; MUST be collected)
+```
+
+### Current Codebase Structure
+
+```bash
+D:\Desarrollo\Repos\video-downloader\
+└── .aiw\
+    └── worklog.md      # explorer findings (authoritative constraints)
+# Everything else: EMPTY. Greenfield. No git repo yet.
+```
+
+### Desired Structure (files to add/modify)
+
+```text
+video-downloader/
+├─ .aiw/{plan.md,worklog.md}
+├─ README.md                                   # 9.1
+├─ pyproject.toml                              # 1.1  (ruff/mypy/pytest config + metadata)
+├─ requirements.txt                            # 1.1  (runtime pins)
+├─ requirements-dev.txt                        # 1.1  (pyinstaller, pytest, ruff, mypy)
+├─ docs/
+│   ├─ USAGE.md                                # 9.2
+│   ├─ BUILD.md                                # 9.2
+│   └─ TROUBLESHOOTING.md                      # 9.2
+├─ vendor/                                     # 7.1  (NOT committed; fetched by script)
+│   ├─ bin/{ffmpeg.exe,ffprobe.exe,deno.exe}
+│   └─ libmpv/libmpv-2.dll
+├─ build/
+│   ├─ fetch_binaries.ps1                       # 7.1
+│   ├─ rthook_win_dll.py                        # 7.3  (SetDllDirectoryW/PATH sanitize)
+│   └─ vdl.spec                                 # 7.2
+├─ scripts/build.ps1                            # 7.4  (one-shot: fetch → pyinstaller)
+├─ src/vdl/
+│   ├─ __init__.py
+│   ├─ __main__.py                              # 1.1  entrypoint (python -m vdl)
+│   ├─ app.py                                   # 6.1  QApplication bootstrap + locale order
+│   ├─ paths.py                                 # 1.2  resource_path() + user dirs  ★ single source of truth
+│   ├─ config.py                                # 1.3  settings + presets (JSON)
+│   ├─ logging_setup.py                         # 1.4  rotating logfile + sys.excepthook
+│   ├─ core/
+│   │   ├─ __init__.py
+│   │   ├─ options.py                           # 2.1  PURE yt-dlp opts builder  ★ highest test value
+│   │   ├─ formats.py                           # 2.2  enumerate formats + selector presets
+│   │   ├─ engine.py                            # 2.3  QThread YoutubeDL worker
+│   │   ├─ queue.py                             # 2.7  queue model + pause/resume/cancel
+│   │   ├─ urls.py                              # 2.6  URL extraction/validation/regex
+│   │   ├─ postprocess.py                       # 3.1–3.4 pp option assembly helpers
+│   │   ├─ cookies.py                           # 4.1
+│   │   ├─ history.py                           # 4.2  download_archive + sqlite index
+│   │   └─ scheduler.py                         # 6.4  QTimer schedule engine
+│   ├─ player/
+│   │   ├─ __init__.py
+│   │   ├─ mpv.py                               # 5.1  VENDORED copy of python-mpv (co-located w/ DLL)
+│   │   └─ widget.py                            # 5.2  VideoPlayerWidget (winId embedding)
+│   ├─ ui/
+│   │   ├─ __init__.py
+│   │   ├─ main_window.py                       # 6.1
+│   │   ├─ download_panel.py                    # 6.1  URL input + options
+│   │   ├─ queue_view.py                        # 2.7 / 6.1
+│   │   ├─ format_dialog.py                     # 2.2
+│   │   ├─ history_view.py                      # 6.6
+│   │   ├─ presets_view.py                      # 6.5
+│   │   ├─ scheduler_view.py                    # 6.4
+│   │   ├─ settings_dialog.py                   # 6.7
+│   │   ├─ notifications.py                     # 6.3
+│   │   └─ clipboard.py                         # 6.2
+│   └─ resources/{icons/, styles/}
+└─ tests/
+    ├─ conftest.py                              # 8.1
+    ├─ unit/{test_options.py,test_urls.py,test_config.py,test_formats.py,test_history.py}   # 8.2
+    └─ integration/{test_engine_download.py,test_frozen_smoke.py}                            # 8.3/8.4
+```
+
+### Known Gotchas & Library Quirks
+
+```python
+# ═══════════════ CRITICAL: PyInstaller onedir sets a leaky DLL search dir ═══════════════
+# PyInstaller's bootloader calls SetDllDirectoryW(<_MEIPASS>) on Windows. That setting is
+# PROCESS-WIDE and INHERITED by child processes, so a spawned ffmpeg.exe/ffprobe.exe/deno.exe
+# can load the wrong (or no) DLLs and either fail or pick up a stale one.
+# FIX (call BEFORE any subprocess spawn, inside a runtime hook + at app start):
+#   import ctypes, os, sys
+#   if os.name == 'nt':
+#       ctypes.windll.kernel32.SetDllDirectoryW(None)      # undo the leak
+#       os.environ['PATH'] = os.pathsep.join(
+#           p for p in os.environ.get('PATH','').split(os.pathsep)
+#           if os.path.normcase(p) != os.path.normcase(getattr(sys,'_MEIPASS','')) )
+# See build/rthook_win_dll.py (leaf 7.3).
+
+# ═══════════════ CRITICAL: libmpv locale ordering ═══════════════
+# libmpv reads LC_NUMERIC for float parsing. Qt overrides it. You MUST do:
+#   1) from PySide6... import ...       # import Qt FIRST
+#   2) import locale; locale.setlocale(locale.LC_NUMERIC, 'C')   # AFTER Qt, BEFORE first MPV()
+#   3) player = mpv.MPV(...)
+# Doing this in the wrong order ⇒ silent wrong values / crashes in libmpv.
+
+# ═══════════════ CRITICAL: native window handle timing ═══════════════
+# winId() is only valid AFTER the widget has a native window. Do:
+#   container.setAttribute(Qt.WA_DontCreateNativeAncestors)
+#   container.setAttribute(Qt.WA_NativeWindow)
+#   # show() the window FIRST, then create MPV(wid=str(int(container.winId())))
+# Creating MPV before show() ⇒ black/blank player.
+
+# ═══════════════ libmpv DLL resolution on Windows ═══════════════
+# python-mpv searches: mpv-2.dll, libmpv-2.dll, mpv-1.dll via ctypes.util.find_library,
+# THEN falls back to os.path.dirname(mpv.py). We VENDOR mpv.py into src/vdl/player/ and put
+# libmpv-2.dll beside it in dev; in the frozen app we place libmpv-2.dll at _internal\ root
+# (same dir as the frozen `mpv`/`vdl.player.mpv` module). Requires libmpv API >= 1.108.
+
+# ═══════════════ yt-dlp postprocessors are ORDER-SENSITIVE ═══════════════
+# SponsorBlock must run before muxing/remux; embed-subtitles/metadata must run AFTER the
+# container is final. Recommended order in the list:
+#   [SponsorBlock] → [FFmpegExtractAudio|FFmpegVideoConvertor] → [FFmpegEmbedSubtitle]
+#   → [EmbedThumbnail] → [FFmpegMetadata]
+# Putting FFmpegMetadata before a converter loses the tags on re-encode.
+
+# ═══════════════ pyinstaller + yt-dlp ═══════════════
+# yt-dlp ships its own PyInstaller hooks (yt_dlp/__pyinstaller). They are auto-discovered via
+# the pyinstaller40 entry-point group after `pip install yt-dlp`. If extractors are missing
+# at runtime, add `--collect-all yt_dlp` (belt-and-braces; adds size).
+# yt-dlp-ejs is DATA (.js files) → it will NOT be collected by import analysis alone.
+#   MUST use --collect-all yt_dlp_ejs (or --collect-data yt_dlp_ejs).
+
+# ═══════════════ PySide6 size ═══════════════
+# Full `PySide6` pulls WebEngine/Qt3D/Charts/... Use `PySide6-Essentials` and EXCLUDE heavy
+# Qt modules in the spec (QtWebEngine*, Qt3D*, QtCharts, QtQuick3D, QtDesigner, QtQml...)
+# to honour the "light" requirement. We only need QtCore/QtGui/QtWidgets (+ optional QtSvg).
+
+# ═══════════════ Windows console on --windowed ═══════════════
+# --windowed means no console → stdout/stderr are None in the frozen app. NEVER print() to
+# a bare stream in frozen mode; route ALL logging through logging_setup (file handler).
+# Guard: `stream = sys.stdout or open(os.devnull,'w')`.
+
+# ═══════════════ Portable vs installed data dir ═══════════════
+# Decide portable mode by presence of a `portable.txt` next to the exe (or write-test the app
+# dir). Never assume %APPDATA% is writable on locked-down machines — fall back gracefully.
+```
+
+---
+
+## Task Tree
+
+> Legend: `[ ]` pending · `[~]` in progress · `[x]` done · `[!]` blocked
+> Owners: explorer · planner · builder · tester · summarizer · documenter · user
+> Leaves are sized for ONE builder delegation (~5–30 min).
+
+## 1. Foundations & Scaffolding  [ ]  owner: builder
+
+### 1.1. Create project skeleton + dependency manifests  [ ]  owner: builder
+- accept: `src/vdl/__main__.py` runs `python -m vdl` and prints an import-OK banner; `pyproject.toml`, `requirements.txt`, `requirements-dev.txt` exist with pinned deps; `python -m pip install -r requirements.txt -r requirements-dev.txt` succeeds on Python 3.14.6.
+- how: CREATE `pyproject.toml` (name `video-downloader`, `requires-python = ">=3.12,<3.15"`, [tool.ruff] line-length 100, [tool.mypy] config, [tool.pytest.ini_options]) · CREATE `requirements.txt` — PRESERVE exactly: `yt-dlp>=2026.8.19`, `yt-dlp-ejs>=0.8.0`, `mpv==1.0.8`, `PySide6-Essentials>=6.12,<6.13`, `platformdirs>=4` · CREATE `requirements-dev.txt` — `pyinstaller>=6.15`, `pytest>=8`, `pytest-qt>=4.4`, `ruff>=0.6`, `mypy>=1.11` · CREATE `src/vdl/__init__.py`, `src/vdl/__main__.py` (thin: builds `QApplication`, calls `app.run()`, guarded by `if __name__ == "__main__":`) · CREATE empty package dirs `core/`, `player/`, `ui/`, `resources/` with `__init__.py`.
+
+### 1.2. Implement `paths.py` — single resource/dir resolver  [ ]  owner: builder
+- accept: `resource_path('bin','ffmpeg.exe')` returns the dev path under `vendor/` when unfrozen and `_internal/bin/ffmpeg.exe` when `sys.frozen`; `user_data_dir()` returns a writable dir and creates it; unit test `tests/unit/test_paths.py` asserts frozen/unfrozen branches via monkeypatching `sys.frozen`/`sys._MEIPASS`.
+- how: CREATE `src/vdl/paths.py` — `def resource_path(*parts) -> str:` using `base = sys._MEIPASS if getattr(sys,"frozen",False) else <repo>/vendor-for-bin-or-package-for-resources`; `def user_data_dir() -> Path:` portable-mode detection (`portable.txt` beside exe) else `platformdirs.user_data_dir("VideoDownloader")`; `def ffmpeg_exe()`, `def ffprobe_exe()`, `def deno_exe()`, `def libmpv_dll()` helpers built on `resource_path`. MIRROR: keep ALL path assembly here — no other module may compute `_MEIPASS` directly.
+
+### 1.3. Implement `config.py` — settings + presets store  [ ]  owner: builder
+- accept: settings round-trip to JSON; a `Preset` can be created/named/loaded/deleted and persists across process restarts; defaults are used when the file is absent/corrupt (no crash); unit tests cover corrupt-file recovery and preset CRUD. (Feeds extra #15.)
+- how: CREATE `src/vdl/config.py` — `@dataclass Settings` (download_dir, default_format, audio_codec, embed_subs, sub_langs, sponsorblock_categories, use_cookies, cookie_browser, archive_enabled, notify_on_complete, max_concurrent, proxy, js_runtime_enabled); `@dataclass Preset` (name + dict of the same option subset); `class ConfigStore` with `load()/save()/get()/set()`, `list_presets()/add_preset()/delete_preset()`; atomic write (temp file + `os.replace`). GOTCHA: write to `user_data_dir()`, never beside the exe unless portable mode.
+
+### 1.4. Implement `logging_setup.py` + global exception hook  [ ]  owner: builder
+- accept: log file is created at `user_data_dir()/logs/vdl.log`, rotates at 2 MB; an unhandled exception is written with a full traceback and a Qt error dialog is shown instead of a silent exit.
+- how: CREATE `src/vdl/logging_setup.py` — `RotatingFileHandler` + console handler; `def install_excepthook(app)` wrapping `sys.excepthook` and `threading.excepthook` to log + `QMessageBox.critical`. GOTCHA: in `--windowed` frozen mode there is no stdout — guard console handler behind `sys.stdout is not None`.
+
+## 2. Download Engine Core  [ ]  owner: builder
+
+### 2.1. Implement `core/options.py` — pure yt-dlp option builder  [ ]  owner: builder
+- accept: `build_ydl_opts(settings, item) -> dict` returns a fully-formed yt-dlp opts dict; unit tests assert exact keys (e.g. `format`, `outtmpl`, `paths`, `postprocessors`, `ffmpeg_location`, `js_runtimes`, `progress_hooks`, `download_archive`) for each settings permutation; **no network, no Qt imports** (importable and testable headless).
+- how: CREATE `src/vdl/core/options.py` — one function per concern: `_base_opts()`, `_format_opts()`, `_paths_opts()`, `_postprocessor_opts()`, `_network_opts()`, `_archive_opts()`, `_js_opts()`; a `build_ydl_opts(settings, job)` that merges them. PRESERVE: pure functions only (no I/O), so leaves 2.2–4.2 compose by CALLING these, not duplicating dicts. INJECT the `ffmpeg_location=os.path.dirname(ffmpeg_exe())` and `js_runtimes={'deno': {'path': deno_dir_or_exe()}}` here.
+
+### 2.2. Format/quality picker  [ ]  owner: builder  ← extra #1
+- accept: user can list available formats for a URL (`extract_info(download=False)`) in a table (id, ext, resolution, fps, vcodec, acodec, filesize, note); selecting a row sets `format='<id>+bestaudio/best'`; a set of named quality presets (Best, 1080p, 720p, Audio-only, Smallest) each produce a valid `format` string. Verified by loading formats for a test URL and choosing 720p.
+- how: CREATE `src/vdl/core/formats.py` — `list_formats(url) -> list[FormatInfo]` (uses `yt_dlp.YoutubeDL({'quiet':True}).extract_info(url, download=False)`), `format_selector(preset, info) -> str`. MIRROR: container-on-demand example from yt-dlp README (bestvideo+bestaudio + audio_ext mapping). CREATE `src/vdl/ui/format_dialog.py` (`QDialog` + `QTableView`; a "Fetch formats" button runs `list_formats` on a worker thread to avoid blocking the GUI).
+
+### 2.3. Implement `core/engine.py` — in-process YoutubeDL worker  [ ]  owner: builder
+- accept: `DownloadWorker(QThread)` runs a job to completion, emits `progress(dict)`, `postprocess(dict)`, `finished(paths)`, `error(str)`; cancel() stops cleanly (raises `yt_dlp.utils.DownloadCancelled`); the GUI thread never blocks; log shows the resolved output path.
+- how: CREATE `src/vdl/core/engine.py` — `class DownloadWorker(QThread)` with `run()` building `ydl_opts = build_ydl_opts(...)` + `progress_hooks=[self._on_progress]` + `postprocessor_hooks=[self._on_pp]`, then `with yt_dlp.YoutubeDL(opts) as ydl: ydl.download([url])`. PRESERVE: no `QWidget` access from the worker thread — only signals. GOTCHA: `yt_dlp.utils.DownloadError` must be caught and re-emitted as a signal, never allowed to kill the thread silently.
+
+### 2.4. Audio-only extraction (mp3/m4a)  [ ]  owner: builder  ← extra #2
+- accept: with audio-only enabled and codec=mp3, downloading a test URL yields a `.mp3`; codec=m4a yields `.m4a`; the file plays in the embedded player; unit test asserts the `FFmpegExtractAudio` postprocessor dict is present with the correct `preferredcodec`.
+- how: MODIFY `src/vdl/core/options.py` — INJECT into `_postprocessor_opts()`: when `settings.audio_only`, set `format='bestaudio/best'` and append `{'key':'FFmpegExtractAudio','preferredcodec': settings.audio_codec, 'preferredquality': '0'}`. MIRROR: yt-dlp README "Extract audio" snippet verbatim.
+
+### 2.5. Playlist / channel download  [ ]  owner: builder  ← extra #3
+- accept: pasting a playlist/channel URL downloads every entry; a "playlist range" field (e.g. `1-10`) maps to `playlist_items`; `--yes-playlist`/`--no-playlist` behaviour is selectable; verified by downloading a small public playlist and counting output files equals the range size.
+- how: MODIFY `src/vdl/core/options.py` — INJECT `playlist_items`, `noplaylist`, `extract_flat` handling; MODIFY `src/vdl/core/engine.py` to report per-entry progress (`info_dict.get('playlist_index')`). Add UI field in `src/vdl/ui/download_panel.py`.
+
+### 2.6. Batch / multi-URL input  [ ]  owner: builder  ← extra #4
+- accept: pasting N URLs (one per line) into the input enqueues N jobs; malformed lines are rejected with a visible reason and do NOT block valid ones; unit test `test_urls.py` covers multi-line parse, dedupe, and whitespace/comment handling.
+- how: CREATE `src/vdl/core/urls.py` — `extract_urls(text) -> list[str]` (regex `https?://\S+`, strip trailing punctuation, dedupe preserving order), `is_probably_valid(url)`. MODIFY `src/vdl/ui/download_panel.py` to accept multi-line and fan out into the queue.
+
+### 2.7. Download queue with pause/resume/cancel  [ ]  owner: builder  ← extra #5
+- accept: queue supports add/remove, at most `settings.max_concurrent` running jobs, pause pauses the active job (via `ydl.pause()`-equivalent: set `worker._paused` and honour `DownloadCancelled` on abort then resume by re-downloading with `--continue`/part files preserved), cancel removes a job and deletes its `.part` file. Verified by starting 3 jobs, pausing one mid-flight, resuming it, and confirming the file completes.
+- how: CREATE `src/vdl/core/queue.py` — `class JobState(Enum)`, `@dataclass Job`, `class DownloadQueue(QObject)` with `add()/start_next()/pause(job)/resume(job)/cancel(job)` and signals `job_added/job_updated/job_finished`. GOTCHA: yt-dlp has no true pause; implement pause as `continue_dl=False` + resume via `continuetodl`/`.part` retention. PRESERVE: never delete `.part` on pause, only on cancel.
+
+### 2.8. Progress + speed/ETA reporting  [ ]  owner: builder  ← extra #6
+- accept: the UI shows percent, downloaded/total (human units), speed (MB/s), and ETA (mm:ss), updating ≥ 4×/s; post-process stages (e.g. "Merging") are shown as a distinct status. Verified by observing a live download.
+- how: MODIFY `src/vdl/core/engine.py` — INJECT `_on_progress` reading `status/downloaded_bytes/total_bytes|total_bytes_estimate/speed/eta/filename` and `_on_pp` reading `status/postprocessor`; MODIFY `src/vdl/ui/queue_view.py` to render columns. GOTCHA: `total_bytes` may be `None`; fall back to `total_bytes_estimate`. GOTCHA: hook is called from the worker thread — emit signals, never touch widgets.
+
+## 3. Media Post-Processing  [ ]  owner: builder
+
+### 3.1. Subtitles: download and/or embed  [ ]  owner: builder  ← extra #8
+- accept: with "download subs" on, `.srt`/`.ass` sidecar files are written for selected languages; with "embed subs" on, a container that supports it gets subs muxed in (verified with `ffprobe` showing a subtitle stream); `subtitleslangs` accepts `all`, `en`, `en.*`. Verified on a URL that has subtitles.
+- how: MODIFY `src/vdl/core/options.py` — INJECT `write_subtitles`, `writeautomaticsub`, `subtitleslangs`, `subtitlesformat='srt/best'`, and (when embedding) append `{'key':'FFmpegEmbedSubtitle'}` AFTER any converter. GOTCHA: `FFmpegEmbedSubtitle` silently no-ops when `info['requested_subtitles']` is empty — surface "no subtitles available" in the UI rather than failing.
+
+### 3.2. Thumbnail + metadata embedding  [ ]  owner: builder  ← extra #9
+- accept: with the option on, the output file contains an embedded thumbnail (verified with `ffprobe -show_streams` showing an `attached_pic` video stream) and title/artist/date metadata (verified with `ffprobe -show_format`); `EmbedThumbnail` runs before `FFmpegMetadata`.
+- how: MODIFY `src/vdl/core/options.py` — INJECT `writethumbnail=True` + pp `{'key':'EmbedThumbnail'}` then `{'key':'FFmpegMetadata'}`. GOTCHA: `EmbedThumbnail` for mp4 needs `--ppa`/conversion; if muxing fails, fall back to `FFmpegThumbnailsConvertor` to jpg. Order matters (see gotchas).
+
+### 3.3. SponsorBlock removal  [ ]  owner: builder  ← extra #10
+- accept: with categories selected (e.g. `sponsor,selfpromo`), a marked video has those segments cut; `ffprobe` duration is measurably shorter than the original; when no segments exist the download still succeeds unchanged.
+- how: MODIFY `src/vdl/core/options.py` — INJECT pp `{'key':'SponsorBlock','remove_sponsor_segments': [...]}` as the FIRST postprocessor. MIRROR: `--sponsorblock-remove` semantics (`default` == `all,-filler`; `poi_highlight`/`chapter` not removable). Add a multi-select category control in the download panel.
+
+### 3.4. Format conversion (ffmpeg)  [ ]  owner: builder  ← extra #12
+- accept: user can target a container/codec (e.g. → mp4, → mkv, → webm, → mp3, → opus); the output extension and codec match the choice (verified with `ffprobe`); incompatible combos are rejected with a clear message before download starts.
+- how: MODIFY `src/vdl/core/options.py` — INJECT pp `{'key':'FFmpegVideoConvertor','preferedformat': container}` for video and `FFmpegExtractAudio` for audio targets; a `recodevideo` passthrough for same-container remux. GOTCHA: `FFmpegVideoConvertor` always re-encodes (slow) — offer "remux only" via `--remux-video` semantics where possible. Note the yt-dlp key spelling `preferedformat` (single 'r') — do not "fix" it.
+
+## 4. Access, Identity & History Engine  [ ]  owner: builder
+
+### 4.1. Cookies / browser import  [ ]  owner: builder  ← extra #11
+- accept: user picks a browser (chrome/edge/firefox/brave/opera/vivaldi) from a dropdown; downloads that require auth succeed; the chosen browser is remembered; failure to read the cookie DB yields an actionable error (not a crash). Verified by downloading an age-restricted/private video with a logged-in browser profile.
+- how: CREATE `src/vdl/core/cookies.py` — `def cookies_option(browser: str|None) -> tuple|None` returning yt-dlp's `cookiesfrombrowser` tuple, e.g. `('chrome',)`; MODIFY `src/vdl/core/options.py` — INJECT `cookiesfrombrowser` when set. Also expose a `cookiefile` path option. GOTCHA: Chrome must be CLOSED to read its cookie DB on Windows; the error message must say so.
+
+### 4.2. History via download archive  [ ]  owner: builder  ← extra #14 (engine)
+- accept: `download_archive` file at `user_data_dir()/archive.txt` prevents re-downloading an already-completed video (running the same URL twice downloads once, second run is skipped and reported as such); a SQLite index (`history.db`) records id, title, url, path, status, timestamp for the UI; unit tests cover "already in archive → skip" logic with a temp archive file.
+- how: CREATE `src/vdl/core/history.py` — `class HistoryStore` (sqlite3, stdlib) + `archive_path()`; MODIFY `src/vdl/core/options.py` — INJECT `download_archive` when enabled. GOTCHA: archive is yt-dlp's source of truth (plain text, one video id per line) — never rewrite it, only append via yt-dlp.
+
+## 5. Embedded Player (libmpv)  [ ]  owner: builder
+
+### 5.1. Vendor `mpv.py` + libmpv-2.dll resolution  [ ]  owner: builder
+- accept: `import vdl.player.mpv` succeeds and `mpv.MPV()` constructs (no media) without DLL errors in dev mode AND in the frozen build; a self-test logs the resolved libmpv version (`mpv.MPV(...).version` / `mpv_client_api_version`).
+- how: CREATE `src/vdl/player/mpv.py` — copy the installed `mpv.mpv` module source verbatim (MIRROR upstream, single file, pure ctypes; do NOT edit its internals). Place `vendor/libmpv/libmpv-2.dll` and, in dev, copy/symlink it beside `mpv.py`. ADD `def _ensure_dll_dir()` that prepends the DLL dir to `PATH` before `ctypes` load and undoes PyInstaller's `SetDllDirectoryW`. PRESERVE: upstream function signatures so future updates are a clean re-copy.
+
+### 5.2. Implement `VideoPlayerWidget` (native window handle)  [ ]  owner: builder  ← extra #17
+- accept: a video file displays inside the widget area (not a separate window); resizing the window resizes the video; pausing/seeking works; closing the widget releases libmpv cleanly (no crash on exit). Verified by opening a downloaded file in-app.
+- how: CREATE `src/vdl/player/widget.py` — `class VideoPlayerWidget(QWidget)` with a child `QWidget` container; `container.setAttribute(Qt.WA_DontCreateNativeAncestors)`, `container.setAttribute(Qt.WA_NativeWindow)`; create MPV in `showEvent` (AFTER first show) via `mpv.MPV(wid=str(int(container.winId())), vo='libmpv', keep_open='yes', osc=True)`. GOTCHA: enforce locale ordering in `app.py` (leaf 6.1), not here, so the ordering is globally guaranteed.
+
+### 5.3. Transport controls, tracks, subtitles  [ ]  owner: builder  ← extra #17
+- accept: play/pause, seek bar, volume, mute, fullscreen, speed control, and audio/subtitle track selection all function; keyboard shortcuts (space, ←/→, f, m) work; external subtitle file can be loaded at runtime.
+- how: MODIFY `src/vdl/player/widget.py` — expose `load(path)`, `toggle_pause()`, `seek(sec)`, `set_volume(pct)`, `set_speed(x)`, `set_audio_track(id)`, `set_sub_track(id)`, `add_subtitle_file(path)`; bind Qt shortcuts. GOTCHA: python-mpv keybindings do NOT fire when embedded in Qt — implement shortcuts at the Qt layer, not via `input_default_bindings` (known upstream issue jaseg/python-mpv#200).
+
+## 6. Application Shell & UX  [ ]  owner: builder
+
+### 6.1. Main window, layout, and app bootstrap  [ ]  owner: builder
+- accept: `python -m vdl` opens a window with: URL input + download options (left), queue table (center/bottom), embedded player (right/bottom), and a menu/toolbar with History, Presets, Scheduler, Settings; the app exits cleanly; locale ordering is applied exactly once at startup.
+- how: CREATE `src/vdl/app.py` — `run()` creates `QApplication`, calls `logging_setup.install_excepthook` and `_sanitize_dll_search()`, imports PySide6 modules, THEN `locale.setlocale(locale.LC_NUMERIC,'C')`, then builds `MainWindow`. CREATE `src/vdl/ui/main_window.py` (QMainWindow + QSplitter layout, QMenuBar/QToolBar, QSystemTrayIcon). MIRROR: standard PySide6 QMainWindow pattern. PRESERVE: exactly ONE `QApplication` for the process (required by Qt and by libmpv).
+
+### 6.2. Clipboard auto-detect of URLs  [ ]  owner: builder  ← extra #7
+- accept: copying a video URL to the clipboard auto-fills the input (toggleable in Settings, default ON) without stealing focus or clobbering user typing; non-URL clipboard content is ignored; unit test covers the URL-detection predicate.
+- how: CREATE `src/vdl/ui/clipboard.py` — `class ClipboardWatcher(QObject)` connected to `QGuiApplication.clipboard().dataChanged`; on change, run `urls.is_probably_valid`; if valid and input is empty/untouched, set text and show a subtle "URL detected" hint. GOTCHA: debounce (clipboard fires multiple times) and never overwrite text the user is editing.
+
+### 6.3. Notifications  [ ]  owner: builder  ← extra #16
+- accept: on job completion/failure a Windows notification (tray balloon via `QSystemTrayIcon.showMessage`) appears with the filename and a "Play" action; a "Do not disturb" toggle in Settings suppresses them; when the app is focused the notification is optional (configurable).
+- how: CREATE `src/vdl/ui/notifications.py` — `def notify(title, message, on_click=None)` using `QSystemTrayIcon.showMessage` (no extra dependency). OPTIONAL: allow swapping in `winotify` behind a settings flag. MIRROR: connect to `DownloadQueue.job_finished` signal (leaf 2.7).
+
+### 6.4. Scheduler (timed downloads)  [ ]  owner: builder  ← extra #13
+- accept: user can schedule one or more queued downloads for a specific date/time or a daily repeat; at the scheduled moment the job is enqueued and runs; scheduled items persist across restarts; a scheduled item can be cancelled; unit test covers "due now?" computation with frozen clock.
+- how: CREATE `src/vdl/core/scheduler.py` — `@dataclass ScheduleItem(when, repeat, job)`, `class Scheduler(QObject)` driven by a 30 s `QTimer`, persisting to `user_data_dir()/schedules.json`. MODIFY `src/vdl/ui/scheduler_view.py` to CRUD items. GOTCHA: if the app is closed at trigger time, on next launch mark missed one-shot items as "missed" (do NOT silently fire stale downloads).
+
+### 6.5. Presets UI  [ ]  owner: builder  ← extra #15
+- accept: user can save the current download options as a named preset, load it from a dropdown, and delete it; loading a preset repopulates every option control; presets persist across restarts. Verified by save→restart→load.
+- how: MODIFY `src/vdl/ui/presets_view.py` — CRUD over `ConfigStore.list_presets()/add_preset()/delete_preset()` (leaf 1.3); wire a "Preset" combobox into `download_panel.py`.
+
+### 6.6. History view  [ ]  owner: builder  ← extra #14 (UI)
+- accept: a table lists past downloads (title, site, quality, size, date, status) from `history.db`; rows can be re-opened in the embedded player; a "Clear history" and "Open folder" action exist; the "already downloaded" state is visible when a URL is pasted again.
+- how: CREATE `src/vdl/ui/history_view.py` — `QTableView` + model over `HistoryStore.items()` (leaf 4.2); double-click → `player.load(path)` (leaf 5.3).
+
+### 6.7. Settings dialog  [ ]  owner: builder
+- accept: settings for default download dir, max concurrent downloads, proxy, JS runtime on/off, notifications, clipboard watcher, and portable-mode indicator are editable and persist; changing download dir takes effect for the next job.
+- how: CREATE `src/vdl/ui/settings_dialog.py` over `Settings` (leaf 1.3). PRESERVE: no option is written to disk without going through `ConfigStore.save()`.
+
+## 7. Packaging & Binary Bundling  [ ]  owner: builder
+
+### 7.1. `build/fetch_binaries.ps1` — acquire + verify sidecars  [ ]  owner: builder
+- accept: running the script produces `vendor/bin/ffmpeg.exe`, `vendor/bin/ffprobe.exe`, `vendor/bin/deno.exe`, `vendor/libmpv/libmpv-2.dll`; each is checksum-verified (against the published `checksums.sha256` where available) and re-running is idempotent (skips if present + verified); the script prints the resolved versions.
+- how: CREATE `build/fetch_binaries.ps1` — download `ffmpeg-master-latest-win64-gpl.zip` from `https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/`, extract `bin/ffmpeg.exe`+`bin/ffprobe.exe`; download `mpv-dev-x86_64-*.7z` from shinchiro releases (latest non-v3, x86_64), extract `libmpv-2.dll` (needs `7z`); download `deno-x86_64-pc-windows-msvc.zip` from `https://github.com/denoland/deno/releases/latest` (the `deno` binary, NOT `denort`; min 2.3.0). GOTCHA: `mpv-dev` is GPL; provenance/licence notes go in `docs/BUILD.md`.
+
+### 7.2. `build/vdl.spec` — onedir windowed build  [ ]  owner: builder
+- accept: `python -m PyInstaller --clean --noconfirm build\vdl.spec` produces `dist\VideoDownloader\VideoDownloader.exe` with `_internal\` containing `ffmpeg.exe`, `ffprobe.exe`, `deno.exe`, `libmpv-2.dll`, `yt_dlp_ejs\`; NO `.onefile` artifact; heavy Qt modules absent (check: `Test-Path dist\VideoDownloader\_internal\PySide6\QtWebEngineCore.pyd` → False).
+- how: CREATE `build/vdl.spec` — one-folder template: `Analysis(..., datas=[('src/vdl/resources','vdl/resources')], binaries=[('vendor/bin/ffmpeg.exe','.'),('vendor/bin/ffprobe.exe','.'),('vendor/bin/deno.exe','.'),('vendor/libmpv/libmpv-2.dll','.')], hiddenimports=['yt_dlp_ejs'], excludes=['PySide6.QtWebEngineCore','PySide6.QtWebEngineWidgets','PySide6.Qt3DCore','PySide6.QtCharts','PySide6.QtQuick','PySide6.QtQml','PySide6.QtDesigner','tkinter','matplotlib','numpy'], runtime_hooks=['build/rthook_win_dll.py'])`, `EXE(..., console=False)`, `COLLECT(...)`. MIRROR: the onedir `COLLECT` template (PyInstaller docs). PRESERVE: `console=False` (windowed) while keeping `logging` file output.
+
+### 7.3. Windows DLL-search sanitization runtime hook  [ ]  owner: builder
+- accept: in the frozen app, `ffmpeg -version` and `deno --version` invoked as subprocesses from within the app succeed (proving the leaked `SetDllDirectoryW` is cleared); a pytest/`--selftest` flag prints the sanitized `PATH` tail and confirms `_MEIPASS` is removed from it.
+- how: CREATE `build/rthook_win_dll.py` — at import: `if os.name=='nt': ctypes.windll.kernel32.SetDllDirectoryW(None)` and strip `sys._MEIPASS` from `os.environ['PATH']`. MIRROR the same helper into `src/vdl/paths.py::_sanitize_dll_search()` so dev and frozen behave identically. INJECT a call at the very top of `src/vdl/__main__.py`.
+
+### 7.4. Build orchestration + smoke test of the frozen app  [ ]  owner: builder
+- accept: `powershell -File scripts\build.ps1` runs fetch→pyinstaller and ends by launching the frozen exe with a `--selftest` flag that writes `selftest.json` (Qt import OK, libmpv version, ffmpeg version, deno version, all resource paths resolved) and exits 0; the script fails loudly if any check is missing.
+- how: CREATE `scripts/build.ps1` (idempotent; activates `.venv`; calls fetch then `python -m PyInstaller`); MODIFY `src/vdl/__main__.py` to support `--selftest` BEFORE creating any window (so it can run in CI/headless-ish). PRESERVE: `--selftest` must not require a display for the non-Qt checks; guard the Qt check in a try/except.
+
+## 8. Automated Testing  [ ]  owner: tester
+
+### 8.1. pytest scaffolding + fixtures  [ ]  owner: tester
+- accept: `python -m pytest tests/unit -q` collects and runs; `tests/conftest.py` provides fixtures `tmp_config_dir`, `fake_settings`, `sample_info_dict`, and a `pytest.mark.integration` marker registered in `pyproject.toml`; unit tests need NO network and NO display.
+- how: CREATE `tests/conftest.py` + register markers in `pyproject.toml` `[tool.pytest.ini_options] markers = ["integration: needs network"]`. MIRROR: pytest-qt `qtbot` fixture for any widget tests.
+
+### 8.2. Unit tests for pure logic  [ ]  owner: tester
+- accept: `tests/unit/test_options.py`, `test_urls.py`, `test_config.py`, `test_formats.py`, `test_history.py` pass; options tests assert exact dict shapes for ≥ 8 settings permutations (default, audio-only, subtitles+embed, sponsorblock, conversion, cookies, archive, playlist-range); urls tests cover messy multi-line input.
+- how: CREATE the five test files; drive `core/options.build_ydl_opts` with `fake_settings` and assert keys/values. PRESERVE: these tests must not import `PySide6` (keep the engine logic headless-testable).
+
+### 8.3. Integration test — real download  [ ]  owner: tester
+- accept: `python -m pytest tests/integration -q -m integration` downloads a known SHORT public video to a temp dir via `core/engine.py`, asserts a non-empty file exists and a `progress_hooks` "finished" event was received; skipped by default unless `--run-integration`/env `VDL_RUN_INTEGRATION=1`.
+- how: CREATE `tests/integration/test_engine_download.py`; default test URL = `https://www.youtube.com/watch?v=jNQXAC9IVRw` ("Me at the zoo", 19 s, public); a secondary no-JS-runtime URL may be used via env `VDL_TEST_URL`. GOTCHA: this test validates the deno/EJS path — if it fails only on YouTube, that is the JS-runtime signal, not an engine bug.
+
+### 8.4. Player + frozen-app smoke checks  [ ]  owner: tester
+- accept: a test (or documented manual check) confirms `mpv.MPV()` constructs and reports a version, and `player.load()` opens a tiny generated audio file without error; `dist\...\VideoDownloader.exe --selftest` exits 0 with `selftest.json` listing ffmpeg/deno/libmpv versions.
+- how: CREATE `tests/integration/test_frozen_smoke.py` (subprocess the frozen exe with `--selftest`, parse JSON). MIRROR: keep player tests tolerant of headless CI (skip if no `QApplication` possible).
+
+## 9. Documentation  [ ]  owner: documenter
+
+### 9.1. README.md  [ ]  owner: documenter
+- accept: `README.md` explains what the app is, the 17 features, how to run from source, how to build the portable folder, where user data lives, and licence/provenance of bundled binaries; a newcomer can follow it end-to-end.
+- how: CREATE `README.md` — sections: Overview, Features (all 17), Quick Start (source), Build (portable folder), User data & portable mode, Bundled third-party licences (ffmpeg GPL, libmpv GPL, yt-dlp Unlicense, deno MIT, PySide6 LGPL), Troubleshooting link. PRESERVE: only claims that the tester actually verified.
+
+### 9.2. `docs/USAGE.md` + `docs/BUILD.md` + `docs/TROUBLESHOOTING.md`  [ ]  owner: documenter
+- accept: USAGE covers each extra with a screenshot-placeholder + steps; BUILD documents `fetch_binaries.ps1`, the spec, exclusions, and the exact build/launch commands; TROUBLESHOOTING covers (a) player black/no window, (b) YouTube "JS runtime missing", (c) Chrome cookie lock, (d) subprocess DLL errors, (e) antivirus false positives.
+- how: CREATE the three docs. MIRROR: verify every command by running it (or marking as "unverified"). GOTCHA: do not document `--onefile` (unsupported by decision).
+
+## 10. End-to-End Release Validation  [ ]  owner: tester
+
+### 10.1. 17-extra acceptance matrix on the FROZEN build  [ ]  owner: tester
+- accept: every row of the L3 matrix in §Validation Loop is executed against `dist\VideoDownloader\VideoDownloader.exe` and each has an evidence artifact (file, screenshot path, or log excerpt) recorded in `.aiw/worklog.md`; zero rows are "unknown".
+- how: EXECUTE §Validation Loop L3; record pass/fail + evidence per row. GOTCHA: test on a machine/profile WITHOUT Python on PATH to prove portability.
+
+### 10.2. Package the portable folder + size budget  [ ]  owner: tester
+- accept: `dist\VideoDownloader\` is zipped to `dist\VideoDownloader-portable-<version>.zip`; a `checksums.sha256` is produced; the zipped size and unpacked size are reported; the app runs after extracting to a fresh path.
+- how: EXECUTE the packaging commands in §Validation Loop L3; report sizes against the budget in §Risks. PRESERVE: no onefile artifact in `dist\`.
+
+---
+
+## Implementation Blueprint
+
+### Data Models
+
+```python
+# src/vdl/config.py
+from dataclasses import dataclass, field, asdict
+
+@dataclass
+class Settings:
+    download_dir: str = ""
+    default_format_preset: str = "best"          # best|1080p|720p|audio|smallest
+    audio_only: bool = False
+    audio_codec: str = "mp3"                     # mp3|m4a
+    video_container: str | None = None           # None|mp4|mkv|webm
+    embed_subs: bool = False
+    write_subs: bool = True
+    sub_langs: list[str] = field(default_factory=lambda: ["en"])
+    embed_thumbnail: bool = True
+    embed_metadata: bool = True
+    sponsorblock_enabled: bool = False
+    sponsorblock_categories: list[str] = field(default_factory=lambda: ["sponsor", "selfpromo"])
+    use_cookies: bool = False
+    cookie_browser: str | None = None            # chrome|edge|firefox|brave|opera|vivaldi
+    archive_enabled: bool = True
+    playlist_items: str | None = None            # "1-10"
+    notify_on_complete: bool = True
+    clipboard_watch: bool = True
+    max_concurrent: int = 2
+    proxy: str | None = None
+    js_runtime_enabled: bool = True              # deno for YouTube
+
+@dataclass
+class Preset:
+    name: str
+    values: dict
+
+# src/vdl/core/queue.py
+class JobState(Enum):
+    QUEUED = "queued"; RUNNING = "running"; PAUSED = "paused"
+    DONE = "done"; ERROR = "error"; CANCELLED = "cancelled"
+
+@dataclass
+class Job:
+    id: str
+    url: str
+    title: str = ""
+    state: JobState = JobState.QUEUED
+    progress: float = 0.0
+    speed: float | None = None
+    eta: int | None = None
+    out_path: str | None = None
+    error: str | None = None
+```
+
+### Pseudocode (with CRITICAL details)
+
+```python
+# ─────────────────────────────────────────────────────────────────────────────
+# Task 2.1 — core/options.py : the SINGLE place yt-dlp opts are assembled.
+# Pure functions; no Qt, no I/O → fully unit-testable headless.
+# ─────────────────────────────────────────────────────────────────────────────
+def build_ydl_opts(settings: Settings, job: "Job") -> dict:
+    opts = {
+        "quiet": True, "no_warnings": True, "noprogress": True,
+        "outtmpl": os.path.join(settings.download_dir,
+                                "%(title).200B [%(id)s].%(ext)s"),
+        "ffmpeg_location": os.path.dirname(ffmpeg_exe()),   # GOTCHA: dir, not exe
+        "paths": {"home": settings.download_dir},
+        "progress_hooks": [], "postprocessor_hooks": [],     # engine injects callbacks
+        "retries": 10, "fragment_retries": 10,
+        "concurrent_fragment_downloads": 4,
+        "ignoreerrors": False, "nocheckcertificate": False,
+    }
+    # ---- format selection (#1/#2) ----
+    if settings.audio_only:
+        opts["format"] = "bestaudio/best"
+    else:
+        opts["format"] = FORMAT_PRESETS.get(settings.default_format_preset, "bv*+ba/b")
+    # ---- playlist / range (#3) ----
+    if settings.playlist_items: opts["playlist_items"] = settings.playlist_items
+    # ---- cookies (#11) ----
+    if settings.use_cookies and settings.cookie_browser:
+        opts["cookiesfrombrowser"] = (settings.cookie_browser,)   # e.g. ('chrome',)
+    # ---- archive / history (#14) ----
+    if settings.archive_enabled: opts["download_archive"] = archive_path()
+    # ---- subtitles: write/embed (#8) ----
+    if settings.write_subs or settings.embed_subs:
+        opts["write_subtitles"] = True
+        opts["writeautomaticsub"] = True
+        opts["subtitleslangs"] = settings.sub_langs
+        opts["subtitlesformat"] = "srt/best"
+    # ---- YouTube JS runtime (deno) ----
+    if settings.js_runtime_enabled:
+        opts["js_runtimes"] = {"deno": {"path": deno_exe()}}  # bundled deno.exe path
+    # ---- postprocessors: ORDER IS SEMANTIC (see gotchas) ----
+    pps = []
+    if settings.sponsorblock_enabled:                       # 1) cut FIRST
+        pps.append({"key": "SponsorBlock",
+                    "remove_sponsor_segments": settings.sponsorblock_categories})
+    if settings.audio_only:                                 # 2) extract audio
+        pps.append({"key": "FFmpegExtractAudio",
+                    "preferredcodec": settings.audio_codec, "preferredquality": "0"})
+    elif settings.video_container:                          # 2b) convert video
+        pps.append({"key": "FFmpegVideoConvertor",
+                    "preferedformat": settings.video_container})   # NOTE typo is upstream
+    if settings.embed_subs:                                 # 3) then mux subs
+        pps.append({"key": "FFmpegEmbedSubtitle"})
+    if settings.embed_thumbnail:                            # 4) then thumbnail
+        opts["writethumbnail"] = True
+        pps.append({"key": "EmbedThumbnail"})
+    if settings.embed_metadata:                             # 5) metadata LAST
+        pps.append({"key": "FFmpegMetadata"})
+    if pps: opts["postprocessors"] = pps
+    return opts
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task 6.1 / 5.2 — app.py : the ONE place ordering is enforced
+# ─────────────────────────────────────────────────────────────────────────────
+def run(argv):
+    _sanitize_dll_search()                      # 7.3: SetDllDirectoryW(None)+PATH
+    app = QApplication(argv)
+    logging_setup.install_excepthook(app)
+    from PySide6 import QtCore, QtWidgets       # import Qt BEFORE locale
+    import locale; locale.setlocale(locale.LC_NUMERIC, "C")   # CRITICAL, before any MPV()
+    from vdl.ui.main_window import MainWindow
+    w = MainWindow(); w.show()
+    return app.exec()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task 5.2 — player/widget.py : winId() only AFTER show()
+# ─────────────────────────────────────────────────────────────────────────────
+class VideoPlayerWidget(QWidget):
+    def showEvent(self, ev):
+        super().showEvent(ev)
+        if self._player is None:
+            self._container.setAttribute(QtCore.Qt.WA_DontCreateNativeAncestors)
+            self._container.setAttribute(QtCore.Qt.WA_NativeWindow)
+            wid = str(int(self._container.winId()))          # valid only now
+            self._player = mpv.MPV(wid=wid, vo="libmpv",
+                                   keep_open="yes", osc=True,
+                                   input_default_bindings=True)  # keyboard via Qt instead
+    # GOTCHA: python-mpv keybindings do NOT fire inside Qt (issue #200) →
+    # implement space/left/right/f/m as QShortcut on the parent window.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task 2.8 — engine.py progress hook (runs on WORKER thread → signals only)
+# ─────────────────────────────────────────────────────────────────────────────
+def _on_progress(self, d):
+    if d.get("status") == "downloading":
+        total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+        self.progress.emit({
+            "percent": (d.get("downloaded_bytes", 0) / total * 100) if total else 0,
+            "speed": d.get("speed"), "eta": d.get("eta"),
+            "downloaded": d.get("downloaded_bytes", 0), "total": total,
+        })
+    elif d.get("status") == "finished":
+        self.poster.emit("processing", d.get("filename"))
+```
+
+---
+
+## Validation Loop
+
+> All commands are PowerShell, run from `D:\Desarrollo\Repos\video-downloader`.
+> This project has **no `uv`** — use `python -m venv` + `python -m pip`. `pyinstaller` is invoked as a module (`python -m PyInstaller`).
+
+### L0 — Environment setup (once)
+
+```powershell
+cd D:\Desarrollo\Repos\video-downloader
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
+
+# Acquire + verify sidecar binaries (ffmpeg, ffprobe, deno, libmpv-2.dll)
+powershell -ExecutionPolicy Bypass -File .\build\fetch_binaries.ps1
+```
+
+### L1 — Syntax, style, types
+
+```powershell
+python -m ruff check src tests
+python -m ruff format --check src tests
+python -m mypy src            # advisory: non-blocking until core/ is complete
+python -c "import compileall,sys; sys.exit(0 if compileall.compile_dir('src', quiet=1) else 1)"
+```
+
+### L2 — Unit + integration tests
+
+```powershell
+# Unit (no network, no display) — MUST pass in CI
+python -m pytest tests/unit -q
+
+# Integration (network) — opt-in
+$env:VDL_RUN_INTEGRATION = "1"
+python -m pytest tests/integration -q -m integration
+# Optional: override the test URL
+# $env:VDL_TEST_URL = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
+```
+
+### L2b — Run from source (dev smoke)
+
+```powershell
+python -m vdl                 # window opens; manually exercise extra #17 (player)
+```
+
+### L3 — Build the portable folder
+
+```powershell
+python -m PyInstaller --clean --noconfirm build\vdl.spec
+# (or one-shot:  powershell -ExecutionPolicy Bypass -File .\scripts\build.ps1)
+
+# Assert the bundle is complete and light:
+Test-Path .\dist\VideoDownloader\VideoDownloader.exe              # → True
+Test-Path .\dist\VideoDownloader\_internal\ffmpeg.exe             # → True
+Test-Path .\dist\VideoDownloader\_internal\ffprobe.exe            # → True
+Test-Path .\dist\VideoDownloader\_internal\deno.exe               # → True
+Test-Path .\dist\VideoDownloader\_internal\libmpv-2.dll           # → True
+Test-Path .\dist\VideoDownloader\_internal\yt_dlp_ejs             # → True  (EJS data)
+Test-Path .\dist\VideoDownloader\_internal\PySide6\QtWebEngineCore.pyd  # → False (excluded)
+Get-ChildItem .\dist -Filter *.exe -Recurse | Where-Object { $_.Length -gt 50MB }  # no onefile blob
+```
+
+### L3b — Launch the frozen app
+
+```powershell
+# Machine-readable readiness probe (no window):
+.\dist\VideoDownloader\VideoDownloader.exe --selftest
+Get-Content .\selftest.json      # must show qt_import_ok=true, libmpv=<ver>, ffmpeg=<ver>, deno=<ver>
+
+# Full app:
+Start-Process .\dist\VideoDownloader\VideoDownloader.exe
+```
+
+### L3c — 17-extra acceptance matrix (on the FROZEN build)
+
+Run each row against `dist\VideoDownloader\VideoDownloader.exe`; record evidence in `.aiw/worklog.md`.
+
+| # | Extra | Action | Expected / evidence |
+|---|-------|--------|---------------------|
+| 1 | Format picker | Paste URL → Fetch formats → pick 720p → download | Table lists formats; output ≈720p (`ffprobe -v error -select_streams v -show_entries stream=height -of csv=p=0 file`) |
+| 2 | Audio-only | Enable audio-only, codec=mp3 → download | `.mp3` exists; `ffprobe` shows 1 audio stream, 0 video |
+| 3 | Playlist | Paste public playlist, range `1-2` | exactly 2 output files |
+| 4 | Batch URLs | Paste 3 URLs (one blank, one junk) | 2 queue rows created; junk rejected with reason |
+| 5 | Queue pause/resume | Start a large download → Pause → Resume | file completes; `.part` survived the pause |
+| 6 | Progress/ETA | Observe during download | %, MB/s, ETA update ≥4×/s; "Merging" stage shown |
+| 7 | Clipboard detect | Copy a URL in a browser | input auto-fills; typing is not clobbered |
+| 8 | Subtitles | Enable write+embed subs, langs=en | `.srt` sidecar + embedded stream (`ffprobe -show_streams` codec_type=subtitle) |
+| 9 | Thumb+metadata | Enable both | `ffprobe` shows `attached_pic` stream + title/artist tags |
+| 10 | SponsorBlock | Enable categories → download a marked video | duration shortened vs original; clean run when no segments |
+| 11 | Cookies | Pick browser → download login-walled video | succeeds; if Chrome open, actionable error shown |
+| 12 | Conversion | Target mkv (from mp4 source) | container = matroska (`ffprobe -show_format`) |
+| 13 | Scheduler | Schedule +2 min → wait | job auto-enqueues; item persists after restart |
+| 14 | History/archive | Re-download same URL | second run reports "already downloaded"; History row present |
+| 15 | Presets | Save preset → restart → load | all option controls repopulated |
+| 16 | Notifications | Finish a download while unfocused | tray balloon appears with filename |
+| 17 | Player | Open downloaded file in-app | video renders in the widget; seek/pause/fullscreen work |
+
+### L3d — Portable packaging + size
+
+```powershell
+Compress-Archive -Path .\dist\VideoDownloader\* -DestinationPath .\dist\VideoDownloader-portable.zip -Force
+Get-ChildItem .\dist\VideoDownloader -Recurse | Measure-Object -Property Length -Sum   # unpacked bytes
+Get-FileHash .\dist\VideoDownloader-portable.zip -Algorithm SHA256
+# Extract to a NEW path (e.g. C:\Temp\vdl-test) and launch → must work with no Python on PATH.
+```
+
+### L4 — Portability proof
+
+```powershell
+# In a shell where Python is NOT on PATH (or on a second machine), run:
+C:\Temp\vdl-test\VideoDownloader\VideoDownloader.exe --selftest   # exit code 0
+```
+
+---
+
+## Anti-Patterns
+
+- ❌ **Do NOT create a onefile build.** Every PyInstaller invocation must be onedir. No `--onefile` anywhere, ever.
+- ❌ **Do NOT compute `sys._MEIPASS` outside `paths.py`.** One resolver, one truth (leaf 1.2).
+- ❌ **Do NOT assemble yt-dlp opts anywhere but `core/options.py`.** Duplicated dicts drift and break tests.
+- ❌ **Do NOT touch Qt widgets from the worker thread.** Emit signals; the GUI thread renders.
+- ❌ **Do NOT call `winId()` before the container is shown** — it returns an invalid handle and yields a blank player.
+- ❌ **Do NOT set `LC_NUMERIC` after the first `mpv.MPV()`** — it silently corrupts libmpv behaviour.
+- ❌ **Do NOT rely on libmpv/PyInstaller DLL search "just working".** Apply the `SetDllDirectoryW(None)` + PATH sanitization.
+- ❌ **Do NOT ship without `--collect-all yt_dlp_ejs`** — YouTube will break with "JS runtime missing".
+- ❌ **Do NOT "fix" the upstream option typo `preferedformat`** in `FFmpegVideoConvertor` — it is the real key.
+- ❌ **Do NOT delete `.part` files on pause** (only on cancel) — that defeats resume.
+- ❌ **Do NOT bundle full `PySide6`** — use `PySide6-Essentials` and exclude WebEngine/3D/Charts to honour "light".
+- ❌ **Do NOT `print()` in frozen `--windowed` mode** — stdout is `None`; route everything through `logging`.
+- ❌ **Do NOT commit `vendor/` binaries** to source control — fetch them via `fetch_binaries.ps1`.
+- ❌ **Do NOT silently swallow yt-dlp errors** — surface `DownloadError` text to the UI and the log.
+
+---
+
+## Assumptions
+
+- Python **3.14.6** (installed) is the build interpreter; the plan also permits 3.12/3.13 (`requires-python >=3.12,<3.15`) since PySide6 6.12 supports 3.10–3.15.
+- The end user is on **Windows x86_64**; only `win_amd64` artifacts are targeted.
+- Network access is available at build time for `fetch_binaries.ps1`, and at least intermittently at run time for downloads.
+- A "known short public test URL" (`https://www.youtube.com/watch?v=jNQXAC9IVRw`) stays available; the tester may substitute via `VDL_TEST_URL`.
+- `7z` (or `tar` on modern Windows, which handles `.7z`? **no** — require `7z`) is available to extract the `.7z` libmpv archive; if not, `fetch_binaries.ps1` installs `7zip` via `winget` or uses `py7zr`.
+- GPL bundling of ffmpeg/libmpv is acceptable (user decision, 2026-10-11).
+
+## Risks
+
+- **libmpv embedding fragility** (winId timing, locale, DLL resolution) — highest-uncertainty area. *Mitigation:* isolate in leaves 5.1–5.3, verify `--selftest` early, and keep a fallback of launching the system player if libmpv fails to initialize (do not crash the app).
+- **YouTube JS-runtime churn** — deno ≥2.3.0 + `yt-dlp-ejs` are moving targets. *Mitigation:* bundle both, pin versions, and document the exact failure signature; non-YouTube sites work without them.
+- **Bundle size** — PySide6 + ffmpeg + libmpv + deno can reach ~250–400 MB unpacked. *Mitigation:* PySide6-Essentials + Qt-module exclusions; measure in L3d against a ≤ 350 MB unpacked budget.
+- **Antivirus false positives** on the frozen exe (official PyInstaller caveat). *Mitigation:* document in TROUBLESHOOTING; consider signing later (out of scope).
+- **PyInstaller + Python 3.14 maturity** — 3.14 support is recent (6.15.0). *Mitigation:* allow pinning 3.12/3.13 for the build venv if a Qt/plugin issue appears.
+- **Chrome cookie DB lock** — reading cookies while Chrome runs fails. *Mitigation:* explicit error message; support Firefox as the fallback browser.
+- **Plan is at the 10-branch ceiling.** No room to add an 11th top-level branch without restructuring; new scope must be merged into an existing branch or explicitly re-planned.
+
+## Implementation Notes
+
+- **Build order matters:** do branch 1 → 2.1 → 5.1/5.2 → 6.1 first to reach a runnable vertical slice, then fan out to the remaining extras. This satisfies the "progressive success" principle: each of those steps is independently verifiable before complexity grows.
+- **`--selftest` is the backbone of validation** — implement it early (leaf 7.4 touches `__main__.py`) so the tester can verify the frozen bundle without a GUI.
+- **python-mpv is vendored, not pinned-by-install,** for the player module (leaf 5.1) so the DLL co-location guarantee survives packaging. `requirements.txt` still lists `mpv==1.0.8` as the provenance reference for the vendored copy; keep a header comment in `src/vdl/player/mpv.py` recording the upstream version and licence.
+- **Data stores are deliberately split:** `archive.txt` (yt-dlp contract, append-only) vs `history.db` (SQLite, rich UI). Do not merge them; the archive must remain byte-compatible with yt-dlp.
+- **Deliberately out of scope** (call out in docs, do not implement): onefile packaging, macOS/Linux builds, DRM circumvention, browser extension, auto-update, code signing, portable-mode encryption.
+- This plan was produced from a single explorer pass plus planner research against live PyPI/GitHub/Qt sources on 2026-10-11; all version/compat facts are dated and must be re-verified if execution slips more than ~4 weeks.
+
+## Plan Rulings (append-only — never edit or delete a ruling)
+
+- R-001 [2026-10-11] Plan created — by: planner — basis: explorer findings (`.aiw/worklog.md`) + live verification against PyPI, GitHub (yt-dlp/FFmpeg-Builds, shinchiro/mpv-winbuild-cmake), PyInstaller changelog, and Qt for Python blog — supersedes: none · approved-by: n/a
+- R-002 [2026-10-11] Adopt a git workflow: `git init` the repo; add a `.gitignore` (exclude `.venv/`, `vendor/` binaries, `dist/`, PyInstaller `build/` artifacts + `*.spec` cache, `__pycache__/`, `*.pyc`, `.aiw/` stays tracked, user `data/`, `logs/`, `*.db`, `selftest.json`, `*.zip`); commit per completed leafy-branch with descriptive messages. Git plumbing folded into branch 1 (leaf 1.1). — by: user — basis: user instruction (2026-10-11) — supersedes: none · approved-by: user
+
+CONFIDENCE: 8/10 — highest remaining uncertainty is libmpv embedding + PyInstaller interop on Python 3.14 (leaves 5.1–5.3, 7.2–7.3) and YouTube JS-runtime churn; an early `--selftest` vertical slice (branches 1→2.1→5→6.1→7.4) would raise it to 9 by de-risking those before the 17-extra fan-out.
