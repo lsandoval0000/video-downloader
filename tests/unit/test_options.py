@@ -36,7 +36,10 @@ def make(**overrides: object) -> Settings:
         "js_runtime_enabled": False,
         "use_cookies": False,
         "cookie_browser": None,
+        "cookie_file": None,
         "video_container": None,
+        "video_remux": False,
+        "convert_thumbnail": False,
         "playlist_items": None,
         "proxy": None,
     }
@@ -66,7 +69,7 @@ def test_default_settings_full_build() -> None:
     """Out-of-the-box Settings (subs + thumb + metadata + archive + js on)."""
     opts = options.build_ydl_opts(Settings(download_dir=r"C:\dl"))
     assert opts["format"] == "bv*+ba/b"
-    assert opts["write_subtitles"] is True
+    assert opts["writesubtitles"] is True
     assert opts["writethumbnail"] is True
     assert [pp["key"] for pp in opts["postprocessors"]] == ["EmbedThumbnail", "FFmpegMetadata"]
     assert "download_archive" in opts
@@ -92,7 +95,8 @@ def test_audio_only_m4a() -> None:
 # ── permutation 4: subtitles write + embed (extra #8) ────────────────────────
 def test_subtitles_write_and_embed() -> None:
     opts = options.build_ydl_opts(make(write_subs=True, embed_subs=True, sub_langs=["en", "es"]))
-    assert opts["write_subtitles"] is True
+    # VERIFIED (yt-dlp 2026.08.19): the key is `writesubtitles` (no underscore).
+    assert opts["writesubtitles"] is True
     assert opts["writeautomaticsub"] is True
     assert opts["subtitleslangs"] == ["en", "es"]
     assert opts["subtitlesformat"] == "srt/best"
@@ -101,7 +105,7 @@ def test_subtitles_write_and_embed() -> None:
 
 def test_subtitles_absent_when_disabled() -> None:
     opts = options.build_ydl_opts(make(write_subs=False, embed_subs=False))
-    assert "write_subtitles" not in opts
+    assert "writesubtitles" not in opts
     assert "subtitleslangs" not in opts
 
 
@@ -202,3 +206,178 @@ def test_postprocessor_order_is_semantic() -> None:
         "FFmpegMetadata",
     ]
     assert opts["writethumbnail"] is True
+
+
+# ══ branch 3 — media post-processing extensions ═══════════════════════════════
+
+
+# ── 3.1 subtitles: availability helpers (extra #8) ───────────────────────────
+_SAMPLE_INFO_WITH_SUBS = {
+    "subtitles": {"en": [{"ext": "vtt"}], "en-US": [{"ext": "vtt"}]},
+    "automatic_captions": {"es": [{"ext": "json3"}], "de": [{"ext": "json3"}]},
+}
+
+
+def test_subtitle_langs_present_exact_and_regex() -> None:
+    info = _SAMPLE_INFO_WITH_SUBS
+    assert options.subtitle_langs_present(info, ["en"]) == ["en"]
+    assert options.subtitle_langs_present(info, ["en.*"]) == ["en", "en-US"]
+    assert options.subtitle_langs_present(info, ["all"]) == ["de", "en", "en-US", "es"]
+    assert options.subtitle_langs_present(info, ["fr"]) == []
+
+
+def test_subtitle_warning_reports_no_subtitles() -> None:
+    settings = make(write_subs=True, embed_subs=True)
+    msg = options.subtitle_warning({"subtitles": {}, "automatic_captions": {}}, settings)
+    assert msg is not None and "No subtitles" in msg
+
+
+def test_subtitle_warning_reports_language_mismatch() -> None:
+    settings = make(write_subs=True, sub_langs=["fr"])
+    msg = options.subtitle_warning(_SAMPLE_INFO_WITH_SUBS, settings)
+    assert msg is not None and "fr" in msg
+
+
+def test_subtitle_warning_none_when_available() -> None:
+    settings = make(write_subs=True, embed_subs=True, sub_langs=["en"])
+    assert options.subtitle_warning(_SAMPLE_INFO_WITH_SUBS, settings) is None
+
+
+def test_subtitle_warning_flags_unsupported_container() -> None:
+    settings = make(write_subs=False, embed_subs=True, sub_langs=["en"], video_container="avi")
+    msg = options.subtitle_warning(_SAMPLE_INFO_WITH_SUBS, settings)
+    assert msg is not None and "avi" in msg
+
+
+def test_subtitle_warning_absent_when_disabled() -> None:
+    settings = make(write_subs=False, embed_subs=False)
+    assert options.subtitle_warning({}, settings) is None
+
+
+def test_embed_subtitles_supported_set() -> None:
+    assert options.embed_subtitles_supported("mkv") is True
+    assert options.embed_subtitles_supported("mp4") is True
+    assert options.embed_subtitles_supported("avi") is False
+    assert options.embed_subtitles_supported(None) is False
+
+
+# ── 3.2 thumbnail + metadata (extra #9) ──────────────────────────────────────
+def test_thumbnail_then_metadata_chain() -> None:
+    opts = options.build_ydl_opts(make(embed_thumbnail=True, embed_metadata=True))
+    assert opts["writethumbnail"] is True
+    assert [pp["key"] for pp in opts["postprocessors"]] == ["EmbedThumbnail", "FFmpegMetadata"]
+
+
+def test_thumbnail_conversion_inserted_before_embed() -> None:
+    opts = options.build_ydl_opts(
+        make(embed_thumbnail=True, embed_metadata=False, convert_thumbnail=True)
+    )
+    assert opts["postprocessors"] == [
+        {"key": "FFmpegThumbnailsConvertor", "format": "jpg", "when": "before_dl"},
+        {"key": "EmbedThumbnail"},
+    ]
+
+
+def test_thumbnail_absent_when_disabled() -> None:
+    opts = options.build_ydl_opts(make(embed_thumbnail=False, embed_metadata=False))
+    assert "writethumbnail" not in opts
+    assert "postprocessors" not in opts
+
+
+def test_embed_thumbnail_supported_set() -> None:
+    assert options.embed_thumbnail_supported("mp4") is True
+    assert options.embed_thumbnail_supported("webm") is False
+
+
+# ── 3.3 sponsorblock presets (extra #10) ─────────────────────────────────────
+def test_sponsorblock_default_preset_expands() -> None:
+    assert options.sponsorblock_categories_for("default") == ["all", "-filler"]
+    assert options.sponsorblock_categories_for("sponsor") == ["sponsor"]
+    assert options.sponsorblock_categories_for(["intro", "outro"]) == ["intro", "outro"]
+    assert options.sponsorblock_categories_for(None) == []
+
+
+def test_sponsorblock_non_removable_dropped() -> None:
+    cats = options.removable_sponsorblock_categories(
+        ["sponsor", "chapter", "poi_highlight", "intro"]
+    )
+    assert cats == ["sponsor", "intro"]
+
+
+def test_sponsorblock_only_non_removable_adds_no_chain() -> None:
+    opts = options.build_ydl_opts(
+        make(sponsorblock_enabled=True, sponsorblock_categories=["chapter"])
+    )
+    assert "postprocessors" not in opts
+
+
+def test_sponsorblock_default_remove_chain() -> None:
+    opts = options.build_ydl_opts(
+        make(sponsorblock_enabled=True, sponsorblock_categories=["all", "-filler"])
+    )
+    assert opts["postprocessors"][0] == {
+        "key": "SponsorBlock",
+        "categories": ["all", "-filler"],
+        "when": "after_filter",
+    }
+    assert {
+        "key": "ModifyChapters",
+        "remove_sponsor_segments": ["all", "-filler"],
+    } in opts["postprocessors"]
+
+
+# ── 3.4 conversion (extra #12) ───────────────────────────────────────────────
+def test_remux_uses_remuxer_key() -> None:
+    opts = options.build_ydl_opts(make(video_container="mp4", video_remux=True))
+    assert opts["postprocessors"] == [{"key": "FFmpegVideoRemuxer", "preferedformat": "mp4"}]
+
+
+def test_recode_is_default_for_video_container() -> None:
+    opts = options.build_ydl_opts(make(video_container="webm", video_remux=False))
+    assert opts["postprocessors"] == [{"key": "FFmpegVideoConvertor", "preferedformat": "webm"}]
+
+
+def test_validate_conversion_rejects_unknown_container() -> None:
+    with pytest.raises(options.ConversionError):
+        options.build_ydl_opts(make(video_container="doc"))
+
+
+def test_validate_conversion_rejects_audio_plus_video() -> None:
+    with pytest.raises(options.ConversionError):
+        options.build_ydl_opts(make(audio_only=True, video_container="mp4"))
+
+
+def test_validate_conversion_rejects_unknown_audio_codec() -> None:
+    with pytest.raises(options.ConversionError):
+        options.build_ydl_opts(make(audio_only=True, audio_codec="wma"))
+
+
+def test_validate_conversion_accepts_valid_combos() -> None:
+    options.validate_conversion(make(audio_only=True, audio_codec="m4a"))
+    options.validate_conversion(make(video_container="mkv"))
+    options.validate_conversion(make())
+
+
+# ── 4.1 cookies (extra #11) ──────────────────────────────────────────────────
+def test_cookiefile_injected() -> None:
+    opts = options.build_ydl_opts(
+        make(use_cookies=True, cookie_browser=None, cookie_file=r"C:\c\cookies.txt")
+    )
+    assert opts["cookiefile"] == r"C:\c\cookies.txt"
+    assert "cookiesfrombrowser" not in opts
+
+
+def test_cookies_both_sources_injected() -> None:
+    opts = options.build_ydl_opts(
+        make(use_cookies=True, cookie_browser="firefox", cookie_file=r"C:\c\cookies.txt")
+    )
+    assert opts["cookiefile"] == r"C:\c\cookies.txt"
+    assert opts["cookiesfrombrowser"] == ("firefox",)
+
+
+def test_cookies_disabled_ignores_sources() -> None:
+    opts = options.build_ydl_opts(
+        make(use_cookies=False, cookie_browser="chrome", cookie_file=r"C:\c\cookies.txt")
+    )
+    assert "cookiefile" not in opts
+    assert "cookiesfrombrowser" not in opts

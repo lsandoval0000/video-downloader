@@ -35,15 +35,18 @@ class Settings:
     audio_only: bool = False
     audio_codec: str = "mp3"  # mp3|m4a
     video_container: str | None = None  # None|mp4|mkv|webm
+    video_remux: bool = False  # remux (stream-copy) instead of re-encode (extra #12)
     embed_subs: bool = False
     write_subs: bool = True
     sub_langs: list[str] = field(default_factory=lambda: ["en"])
     embed_thumbnail: bool = True
+    convert_thumbnail: bool = False  # pre-convert thumbnails to jpg before embedding
     embed_metadata: bool = True
     sponsorblock_enabled: bool = False
     sponsorblock_categories: list[str] = field(default_factory=lambda: ["sponsor", "selfpromo"])
     use_cookies: bool = False
     cookie_browser: str | None = None  # chrome|edge|firefox|brave|opera|vivaldi
+    cookie_file: str | None = None  # explicit cookies.txt path (extra #11)
     archive_enabled: bool = True
     playlist_items: str | None = None  # "1-10"
     notify_on_complete: bool = True
