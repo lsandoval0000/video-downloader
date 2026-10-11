@@ -545,3 +545,10 @@ EVIDENCE (`.venv\Scripts\python.exe`):
 - Decisions: Committed ONLY `.aiw/` files — no source, no binaries (`dist/`/`vendor/`/`.venv/` remain gitignored per R-002). No `--amend`/force-push.
 - Issues: none. (Note: system wall clock read 16:48 while the preceding tester entry is stamped 17:08 — a clock-source discrepancy; timestamps recorded as observed, nothing rewritten.)
 - Evidence: pre-commit `git status --short` = ` M .aiw/worklog.md` only; commit `38a3204` "docs(aiw): record 10.12 verification" (1 file changed, 8 insertions); push + post-commit verification recorded in the orchestrator report.
+
+## [2026-10-11 17:20] A.L.L.I.C.E. — 10.13 closed
+- Status: DONE. The README's stale "Not yet verified" block is gone.
+- Trigger: the user confirmed video fullscreen ✓ and the 10.12 merge fix ✓, and pointed out the README still listed now-tested items as unverified.
+- Change: `README.md` `## Not yet verified` → `## Manual verification` (portable run on a Python-free machine; live tray balloons + click-to-play; browser clipboard auto-fill; video fullscreen — all user-confirmed on a real Windows desktop); TOC + intro cross-references repointed. `docs/USAGE.md` (§7 clipboard, §15 notifications, §16 player) + `docs/BUILD.md` portability note updated the same way.
+- Verified: `grep -rin "not yet verified|unverified|not been confirmed|not exercised|has not been done" README.md docs` = ZERO matches. No new claims beyond the user's confirmations.
+- No source/behavior change — docs only (no rebuild needed). Still open: nothing; the 10.1 GUI rows are now user-confirmed.

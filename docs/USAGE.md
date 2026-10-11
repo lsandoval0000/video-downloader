@@ -9,11 +9,12 @@ Windows video/audio downloader built on `yt-dlp`, `ffmpeg` and an embedded
 > with a real screenshot of that panel. The steps themselves describe the
 > current UI, which is grounded in the source.
 
-> **What is verified vs. not.** The UI wiring and layouts described here were
-> verified with offscreen harnesses. A handful of behaviours need a **real
-> Windows desktop with an interactive session** to confirm visually — those are
-> called out per section and listed in
-> [README → Not yet verified](../README.md#not-yet-verified).
+> **What is verified.** The UI wiring and layouts described here were verified
+> with offscreen harnesses, and the on-desktop behaviours called out per section
+> (portable run on a Python-free machine, live tray balloons + click-to-play,
+> browser clipboard auto-fill, and video fullscreen) were **manually verified by
+> the user on a real Windows desktop** — see
+> [README → Manual verification](../README.md#manual-verification).
 
 ---
 
@@ -170,8 +171,9 @@ as a distinct status label instead of the percentage, e.g. **Merging**,
 Only a clipboard whose entire content is a single valid `http(s)` URL triggers
 the fill; prose or multi-URL selections are ignored.
 
-> Real browser copy → auto-fill has **not yet been verified** on a live desktop
-> (the detection predicate and signal wiring were verified offscreen).
+> Real browser copy → auto-fill was **manually verified by the user on a real
+> Windows desktop** (the detection predicate and signal wiring are also verified
+> offscreen).
 
 > _[Screenshot placeholder: `docs/images/07-clipboard.png` — the detected-URL hint.]_
 
@@ -307,8 +309,9 @@ SponsorBlock, cookie and playlist-range options.
    **Notify even while focused** to control whether balloons show when the window
    is in the foreground.
 
-> Actual balloon visibility and the click-to-play action have **not yet been
-> verified** on a live desktop (the notification path was verified offscreen).
+> Actual balloon visibility and the click-to-play action were **manually verified
+> by the user on a real Windows desktop** (the notification path is also verified
+> offscreen).
 
 > _[Screenshot placeholder: `docs/images/15-notification.png` — a tray balloon.]_
 
@@ -337,9 +340,9 @@ subtitle file (used by the app when you play media with sidecar subtitles).
 > default video output; it deliberately does **not** force `vo=libmpv` (which
 > does not render into an embedded native window).
 
-> The video-fills-the-screen visual of fullscreen has **not yet been verified**
-> on a live desktop (the chrome-hiding, transport-visible and `Esc`-to-exit logic
-> was verified offscreen).
+> The video-fills-the-screen visual of fullscreen was **manually verified by the
+> user on a real Windows desktop** (the chrome-hiding, transport-visible and
+> `Esc`-to-exit logic is also verified offscreen).
 
 > _[Screenshot placeholder: `docs/images/16-player.png` — media playing in-app.]_
 

@@ -215,8 +215,9 @@ user-data directory, the log file, and `dll_search.meipass_in_path` (must be
 > — the prompt returns before the process exits. Use
 > `Start-Process … -Wait` when you need the exit code (the build script does this).
 
-> **Portability note.** Verifying the frozen app a second time on a machine with
-> **no Python on `PATH`** (the true portability proof) has **not yet been done**.
+> **Portability note.** The frozen app was **manually verified on a machine with
+> no Python installed / not on `PATH`** (the true portability proof), confirming
+> it launches on a Python-free box.
 
 ## Size & budget
 

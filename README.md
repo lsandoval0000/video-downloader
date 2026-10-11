@@ -12,12 +12,12 @@ solves YouTube's JavaScript challenges, and a real **libmpv** player is embedded
 in the window.
 
 > **Package shape / status.** This is version `0.1.0`. The portable folder builds,
-> the frozen `--selftest` passes (exit 0), and the embedded player has been proven
-> to render on Windows during development. Launching the **frozen** window on a
-> machine with **no Python installed / not on `PATH`** has **not yet been
-> verified** — see [Not yet verified](#not-yet-verified). The unpacked portable
-> folder currently measures **~636 MB** (this exceeds the original ≤350 MB design
-> target; see [Size & budget](#size--budget)).
+> the frozen `--selftest` passes (exit 0), the embedded player renders on Windows,
+> and the app has been **manually verified by the user on a real Windows desktop**
+> — including launching the **frozen** window on a machine with **no Python
+> installed / not on `PATH`** (see [Manual verification](#manual-verification)).
+> The unpacked portable folder currently measures **~636 MB** (this exceeds the
+> original ≤350 MB design target; see [Size & budget](#size--budget)).
 
 ---
 
@@ -31,7 +31,7 @@ in the window.
 - [User data & portable mode](#user-data--portable-mode)
 - [Bundled third-party binaries & licences](#bundled-third-party-binaries--licences)
 - [Testing](#testing)
-- [Not yet verified](#not-yet-verified)
+- [Manual verification](#manual-verification)
 - [Documentation](#documentation)
 
 ---
@@ -263,25 +263,22 @@ As last verified, `pytest tests/unit -q` reports **152 passed**, and the opt-in
 integration run reports **3 passed** (the integration suite covers a real
 download and the frozen `--selftest` smoke check).
 
-## Not yet verified
+## Manual verification
 
-These are **not** asserted as working — they were not exercised at the time of
-writing:
+The following behaviours were **manually verified by the user on a real Windows
+desktop** (the wiring for each is also verified offscreen):
 
-- **A full run on a machine with no Python installed / not on `PATH`** — the
-  portability proof (launch the copied folder on a Python-free box) has not been
-  done. The frozen `--selftest` passes, but that is not the same as launching
-  the window on a clean machine.
-- **Live tray-balloon visibility and click-to-play** on a real desktop — the
-  wiring is verified, the visible balloon is not.
-- **Clipboard auto-fill from a real browser copy** — the predicate and signal
-  path are verified offscreen; a real browser copy has not been confirmed.
-- **Video fullscreen on a real desktop** — the chrome-hiding, transport-stays-
-  visible and `Esc`-to-exit logic is verified offscreen; the actual
-  video-fills-the-screen visual has not been confirmed on a live desktop.
+- **Portable run on a Python-free machine** — launching the copied folder on a
+  machine with **no Python installed / not on `PATH`**.
+- **Live tray balloons + click-to-play** — the balloon appears when a download
+  finishes or fails, and clicking it plays the file.
+- **Browser clipboard auto-fill** — copying a video URL in a real browser
+  pre-fills the URL box.
+- **Video fullscreen** — the video fills the screen, the transport controls stay
+  usable, and `Esc` returns to the windowed layout.
 
-Each of these is a manual check on a real Windows desktop; see
-[docs/USAGE.md](docs/USAGE.md) for the per-feature steps.
+Per-feature steps for each of these are in
+[docs/USAGE.md](docs/USAGE.md).
 
 ## Documentation
 
