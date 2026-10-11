@@ -109,6 +109,16 @@ def test_subtitles_absent_when_disabled() -> None:
     assert "subtitleslangs" not in opts
 
 
+def test_subtitle_rate_limit_mitigation() -> None:
+    """Subtitles set a modest inter-download pause to soften HTTP 429 bursts (10.5)."""
+    opts = options.build_ydl_opts(make(write_subs=True))
+    assert opts["sleep_interval_subtitles"] == 1.0
+    # Absent when subtitles are off, so the base opts stay minimal.
+    assert "sleep_interval_subtitles" not in options.build_ydl_opts(
+        make(write_subs=False, embed_subs=False)
+    )
+
+
 # ── permutation 5: sponsorblock (extra #10) ──────────────────────────────────
 def test_sponsorblock_is_first_and_uses_correct_keys() -> None:
     opts = options.build_ydl_opts(

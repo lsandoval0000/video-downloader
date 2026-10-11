@@ -72,6 +72,31 @@ def test_user_data_dir_non_portable(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     assert result.is_dir()
 
 
+def test_user_data_dir_passes_appauthor_false(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Guard against the doubled ``VideoDownloader\\VideoDownloader`` directory (10.6).
+
+    platformdirs mirrors ``appauthor=appname`` when the author is left unset, which
+    would build ``<...>/VideoDownloader/VideoDownloader``. The resolver must pass
+    ``appauthor=False`` so the app name appears exactly once.
+    """
+    captured: dict[str, object] = {}
+
+    def fake_user_data_dir(appname: str, *args: object, **kwargs: object) -> str:
+        captured["appname"] = appname
+        captured["appauthor"] = kwargs.get("appauthor", "MISSING")
+        return str(tmp_path / "appdata")
+
+    monkeypatch.setattr(paths, "app_dir", lambda: tmp_path)
+    monkeypatch.setattr(paths.platformdirs, "user_data_dir", fake_user_data_dir)
+
+    paths.user_data_dir()
+
+    assert captured["appname"] == "VideoDownloader"
+    assert captured["appauthor"] is False
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows-only DLL search sanitisation")
 def test_sanitize_dll_search_strips_meipass(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "_MEIPASS", r"C:\fake\meipass", raising=False)

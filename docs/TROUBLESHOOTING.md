@@ -7,7 +7,8 @@ log file.
 `<user-data-dir>\logs\vdl.log` — see
 [User data & portable mode](../README.md#user-data--portable-mode) for where the
 user-data directory is (next to the app when `portable.txt` is present, otherwise
-`%APPDATA%\VideoDownloader`). An unhandled crash’s full traceback lands there and
+`%LOCALAPPDATA%\VideoDownloader`). The exact resolved directory is logged at the
+top of every run. An unhandled crash’s full traceback lands there and
 is also shown in an error dialog.
 
 **Second stop: the self-test.** The built app can probe itself without a window:

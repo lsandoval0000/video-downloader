@@ -151,6 +151,10 @@ def _subtitle_opts(settings: Settings) -> dict[str, Any]:
         "writeautomaticsub": True,
         "subtitleslangs": list(settings.sub_langs),
         "subtitlesformat": "srt/best",
+        # Modest rate-limit mitigation (leaf 10.5): yt-dlp defaults this to 0, but
+        # subtitle endpoints throttle aggressively (HTTP 429). A 1 s pause between
+        # subtitle downloads softens bursts with no noticeable delay.
+        "sleep_interval_subtitles": 1.0,
     }
 
 

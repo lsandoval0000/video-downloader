@@ -42,7 +42,7 @@ One folder you can zip, copy to a USB stick, unzip anywhere (including
 `C:\Program Files` or a network share) and double-click. No registry writes, no
 installer, no admin rights. All state — settings, presets, history, the download
 archive, logs — lives in a **portable user-data directory** (next to the app in
-portable mode, or under `%APPDATA%` otherwise).
+portable mode, or under `%LOCALAPPDATA%\VideoDownloader` otherwise).
 
 | Piece | Role |
 |-------|------|
@@ -189,9 +189,12 @@ All persistent state lives in a single **user-data directory**:
   executable**. Data goes to `<app folder>\data`. This keeps everything on the
   stick / in the copied folder.
 - **Installed mode** (no `portable.txt`) — data goes to
-  `%APPDATA%\VideoDownloader`. On locked-down machines where that is not
-  writable, the app falls back to `<app folder>\data` and then the OS temp dir,
-  so it never fails to start.
+  `%LOCALAPPDATA%\VideoDownloader` (the per-user *local* app-data folder, not
+  `%APPDATA%`/Roaming). The rotating log is at
+  `%LOCALAPPDATA%\VideoDownloader\logs\vdl.log`; the exact resolved directory is
+  written to that log at every startup. On locked-down machines where the
+  preferred location is not writable, the app falls back to `<app folder>\data`
+  and then the OS temp dir, so it never fails to start.
 
 You can see the active directory any time in **Settings → Data directory**
 (which also shows a *Portable* / *Installed* indicator and an **Open data

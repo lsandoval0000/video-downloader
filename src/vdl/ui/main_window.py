@@ -414,7 +414,7 @@ class MainWindow(QMainWindow):
 
     # ── clipboard + scheduler slots (extras #7, #13) ─────────────────────────
     def _on_clipboard_url(self, url: str) -> None:
-        if self.download_panel.set_url(url):
+        if self.download_panel.append_url(url):
             self.download_panel.show_clipboard_hint()
             self.statusBar().showMessage("URL detected on the clipboard.", 4000)
 

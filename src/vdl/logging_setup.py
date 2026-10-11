@@ -62,6 +62,10 @@ def setup_logging(level: int = logging.INFO) -> logging.Logger:
         logger.addHandler(console_handler)
 
     _configured = True
+    # State the resolved locations up front: the frozen --windowed build has no
+    # console, so "where are my logs?" is answered by the log itself (leaf 10.6).
+    logger.info("data directory: %s", user_data_dir())
+    logger.info("log file: %s", path)
     return logger
 
 

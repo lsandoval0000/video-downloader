@@ -19,7 +19,7 @@ from collections.abc import Callable
 from typing import Any
 
 from PySide6.QtCore import QTimer, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QTextCursor
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -264,6 +264,33 @@ class DownloadPanel(QWidget):
         if not self.is_input_empty():
             return False
         self._urls.setPlainText(url)
+        return True
+
+    def append_url(self, url: str) -> bool:
+        """Append ``url`` as a new line, skipping junk and exact duplicates.
+
+        Unlike :meth:`set_url` (which only ever fills an *empty* box and is a
+        no-op thereafter), this adds each subsequent clipboard copy underneath the
+        existing lines. It ignores URLs that fail the shared validity check and
+        ones already present in the box (matching :func:`extract_urls`), and it
+        refuses to touch a box the user is actively editing, so it never clobbers
+        in-progress text or steals focus. Returns whether the box changed.
+        """
+        candidate = (url or "").strip()
+        if not is_probably_valid(candidate):
+            return False
+        if self._urls.hasFocus():
+            return False
+        if candidate in extract_urls(self._urls.toPlainText()):
+            return False
+        text = self._urls.toPlainText()
+        if text and not text.endswith("\n"):
+            text += "\n"
+        self._urls.setPlainText(text + candidate)
+        # Put the caret after the appended line without stealing focus.
+        cursor = self._urls.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        self._urls.setTextCursor(cursor)
         return True
 
     def show_clipboard_hint(self) -> None:

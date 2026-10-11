@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import TYPE_CHECKING, Any
 
 import yt_dlp
@@ -28,6 +29,36 @@ if TYPE_CHECKING:
     from vdl.core.queue import Job
 
 logger = logging.getLogger("vdl.core.engine")
+
+#: Output suffixes that are sidecar artefacts, not the media deliverable. A
+#: ``DownloadError`` reported *after* one of these landed — e.g. a subtitle write
+#: returning ``HTTP Error 429`` — must not fail a job whose media already
+#: downloaded (leaf 10.5).
+_SIDECAR_SUFFIXES = frozenset(
+    {
+        ".part",
+        ".ytdl",
+        ".tmp",
+        ".srt",
+        ".vtt",
+        ".ass",
+        ".ssa",
+        ".lrc",
+        ".json3",
+        ".srv1",
+        ".srv2",
+        ".srv3",
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+    }
+)
+
+#: yt-dlp names un-merged per-format intermediates ``<stem>.f<id>.<ext>``; those
+#: are NOT the finished media, so a merge failure that leaves only fragments is
+#: still treated as a genuine (fatal) failure.
+_FRAGMENT_RE = re.compile(r"\.f\d+\.[^.]+$", re.IGNORECASE)
 
 
 class DownloadWorker(QThread):
@@ -146,6 +177,28 @@ class DownloadWorker(QThread):
         may have been deleted/replaced by a later postprocessor)."""
         return [p for p in self._output_paths if p and os.path.exists(p)]
 
+    def _media_paths(self) -> list[str]:
+        """Existing outputs that are the media deliverable, not a sidecar.
+
+        Filters :meth:`_existing_paths` down to files that are neither subtitle/
+        thumbnail/temp sidecars nor un-merged ``.f<id>`` format fragments, so the
+        error handler can tell "the media downloaded" apart from "only extras (or
+        raw fragments) did" (leaf 10.5).
+        """
+        deliverable: list[str] = []
+        for path in self._existing_paths():
+            if os.path.splitext(path)[1].lower() in _SIDECAR_SUFFIXES:
+                continue
+            if _FRAGMENT_RE.search(path):
+                continue
+            deliverable.append(path)
+        return deliverable
+
+    @staticmethod
+    def _mentions_subtitles(message: str) -> bool:
+        """Whether a yt-dlp error message refers to a subtitle download."""
+        return "subtitle" in message.lower()
+
     # ── thread entry point ───────────────────────────────────────────────────
     def run(self) -> None:  # noqa: D102 - documented on the class
         opts = build_ydl_opts(self._settings, self._job)
@@ -161,6 +214,22 @@ class DownloadWorker(QThread):
             return
         except yt_dlp.utils.DownloadError as exc:
             message = str(exc)
+            # yt-dlp has no "ignore subtitle errors only" switch: a failed
+            # subtitle write (e.g. "HTTP Error 429: Too Many Requests") raises the
+            # SAME DownloadError as a media failure and would otherwise abort a
+            # job whose media already downloaded. So decide here: if the media
+            # deliverable actually landed, finish the job (DONE) with a warning;
+            # only a DownloadError with no media output is a genuine failure.
+            media = self._media_paths()
+            if media:
+                detail = (
+                    "subtitles failed but the media is present"
+                    if self._mentions_subtitles(message)
+                    else "download reported an error after the media was written"
+                )
+                logger.warning("%s, keeping it: %s — %s", detail, self._job.url, message)
+                self.finished.emit(self._existing_paths())
+                return
             logger.error("download failed: %s — %s", self._job.url, message)
             self.error.emit(message)
             return
