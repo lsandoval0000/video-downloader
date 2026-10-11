@@ -427,3 +427,11 @@ EVIDENCE (`.venv\Scripts\python.exe`):
 - Verified: a real same-URL-twice download produced output both times; the frozen `PYZ.pyz` has no `_archive_opts`/`download_archive`/`archive_enabled`; 173 unit tests pass. Rebuilt + pushed (`191f588`); `origin/master` @ `6ee7f7f`.
 - Artifacts: `dist\VideoDownloader\` rebuilt; `dist\VideoDownloader-portable-0.1.0.zip` (255.94 MiB) + `dist\checksums.sha256` (SHA-256 `fa84ec37â€¦900b3e`); unpacked 635.97 MiB (â‰¤700 per R-008).
 - Still open: 10.1 manual 17-row matrix (GUI observations). No stray `.aiw/plan-*.md` files. `Get-FileHash dist\VideoDownloader-portable-0.1.0.zip -SHA256` -> FA84EC37C48A5E98B9EE65BADEE65944C06823CBE1D72A5DDDDCEDABED900B3E == checksums.sha256. Unpacked sum = 666861943. PYZ: CArchiveReader(exe).extract("PYZ.pyz") -> 8,725,566 B, 1,342 modules; recursive name/const scan of the 4 target modules as above. Fresh-extract selftest.json: ok=true, frozen=true, qt_import_ok=true, errors=[], libmpv v0.41.0-1122-gaccb7b282, ffmpeg/ffprobe/deno ok=true.
+
+## [2026-10-11 14:51] builder — 10.3: final tracking sync push
+- Status: DONE
+- Summary: Committed the orchestrator's post-10.8 tracking edits (leaf 10.8 -> [x] in plan.md; closing A.L.L.I.C.E. session entry in worklog.md) and pushed to origin/master. Nothing outside .aiw/ was staged; tree ends clean and HEAD == origin/master.
+- Files touched: .aiw/plan.md (leaf 10.8 marker + completion note); .aiw/worklog.md (A.L.L.I.C.E. closing entry, already present; this entry).
+- Decisions: Committed ONLY .aiw/ files (no source/binary changes) — kept the sync a single-purpose docs commit per brief + R-002.
+- Issues: none.
+- Evidence: before:  M .aiw/plan.md /  M .aiw/worklog.md (nothing else). Commit f5ec047. Push 6ee7f7f..f5ec047 HEAD -> master exit 0. After: git status --short empty; git rev-parse HEAD == git rev-parse origin/master == f5ec04772ab87a1f4f4c15af42fc50a2767822a3; log: f5ec047 / 6ee7f7f / 191f588.
