@@ -471,7 +471,7 @@ video-downloader/
 - accept: copying a second/third supported URL appends each NEW url to the "URLs (one per line)" box (skipping exact duplicates / junk) instead of being ignored; copying the same URL twice does not duplicate it.
 - how: `src/vdl/ui/clipboard.py` + its `main_window.py` wiring currently gate on an empty box / first-copy flag; change to append-only-new.
 
-### 10.8. Always download — remove the "already downloaded" skip  [ ]  owner: builder  ← user request (2026-10-11)
+### 10.8. Always download — remove the "already downloaded" skip  [x]  owner: builder  ← DONE: yt-dlp `download_archive` injection removed (the only hard skip); dead settings toggle removed; hint reworded to non-blocking; History recording kept. Rebuilt + pushed (`191f588`); same-URL-twice verified to download both times.
 - accept: selecting/downloading a URL ALWAYS downloads it, even if the same video was downloaded before. No silent skip, no "already in archive/history" short-circuit. History may still be RECORDED, but it must never prevent a download.
 - how: remove/disable the yt-dlp `download_archive` option in `src/vdl/core/options.py` and any app-level "already downloaded" guard in `src/vdl/core/engine.py` / `src/vdl/core/history.py` / `src/vdl/core/queue.py` (and any settings toggle / UI indicator for it). Verify by downloading the same URL twice → both produce output.
 
