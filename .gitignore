@@ -1,0 +1,48 @@
+# ─────────────────────────────── Python ───────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+
+# ──────────────────────────── Virtualenvs ─────────────────────────────
+.venv/
+venv/
+env/
+
+# ───────────────────────────── Tooling caches ─────────────────────────
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ──────────────────────── Fetched sidecar binaries ────────────────────
+# vendor/ holds ffmpeg/ffprobe/deno/libmpv fetched by build/fetch_binaries.ps1.
+# Binaries are NEVER committed — they are re-fetched at build time.
+/vendor/
+
+# ────────────────────────── PyInstaller output ────────────────────────
+# dist/ = the built portable folder. build/ = PyInstaller's work dir + caches.
+# NOTE: build/ also holds SOURCE files that MUST stay tracked, so we ignore its
+# *contents* (not the directory itself) and then re-include the source files.
+/dist/
+/build/*
+!/build/vdl.spec
+!/build/fetch_binaries.ps1
+!/build/rthook_win_dll.py
+
+# ───────────────────────────── Runtime data ───────────────────────────
+# Portable-mode user data, logs, archive/history DBs, self-test output, bundles.
+data/
+logs/
+*.db
+selftest.json
+*.part
+*.zip
+
+# ─────────────────────────── Editor / OS noise ────────────────────────
+.idea/
+.vscode/
+Thumbs.db
+Desktop.ini
