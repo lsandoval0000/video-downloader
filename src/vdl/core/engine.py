@@ -218,7 +218,15 @@ class DownloadWorker(QThread):
                 "filename": filename,
             }
         )
-        if d.get("status") == "finished" and filename:
+        # Remember the path at BOTH stages, not just "finished" (leaf 10.12). A
+        # post-processor that FAILS emits only "started", and after a container
+        # conversion (FFmpegVideoConvertor/Remuxer) the *next* PP's "started"
+        # already carries the NEW filepath while the converter's own hooks carry
+        # the soon-to-be-deleted source. Tracking every stage keeps the converted
+        # deliverable visible to _media_paths(), so a later sidecar PP failure
+        # cannot abort a completed (converted) media download. Non-existent paths
+        # are dropped by _existing_paths(), so this never fabricates a deliverable.
+        if filename:
             self._remember(filename)
 
     # ── internals ────────────────────────────────────────────────────────────

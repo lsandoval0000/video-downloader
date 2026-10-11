@@ -20,6 +20,17 @@ Design constraints:
   (``ModifyChapters`` performs the actual SponsorBlock cuts and is placed after
   the container is final / before metadata, mirroring yt-dlp's own CLI ordering.)
 
+* **The merge container is pinned to a robust preference** (leaf 10.12). The
+  media pass sets ``merge_output_format = "mp4/mkv"`` so yt-dlp's ``FFmpegMerger``
+  never targets the fragile **webm** muxer. Merging YouTube's VP9 (HFR) video with
+  Opus audio into webm fails with ffmpeg's generic ``Conversion failed!``
+  (``non monotonically increasing dts`` — yt-dlp #3138 / Gentoo #846641); the
+  documented workaround is to merge into **mkv**. ``mp4`` is kept as the first
+  preference so the common h264+aac case still yields ``.mp4`` unchanged; every
+  webm-bound merge (VP9/AV1 + Opus) now lands in ``mkv`` instead. This mirrors
+  yt-dlp's own behaviour, which already force-upgrades a webm merge to mkv when a
+  thumbnail is embedded. See :data:`MERGE_OUTPUT_FORMAT`.
+
 * **Subtitles are ISOLATED from the media job** (leaf 10.5 round 2). yt-dlp
   writes subtitles *before* it downloads/merges the media, so a rate-limited
   subtitle request (``HTTP 429``) raises ``DownloadError`` while **no media file
@@ -63,6 +74,15 @@ if TYPE_CHECKING:
 #: Output template: title (bounded to 200 bytes so long titles stay valid on
 #: Windows), the video id (guarantees uniqueness), then the extension.
 DEFAULT_OUTTMPL = "%(title).200B [%(id)s].%(ext)s"
+
+#: Preferred merge container(s) for ``FFmpegMerger`` (leaf 10.12), "/"-separated
+#: and passed straight to yt-dlp's ``merge_output_format``. ``webm`` is
+#: deliberately excluded: stream-copying YouTube's VP9 (HFR) video + Opus audio
+#: into webm makes ffmpeg abort with ``non monotonically increasing dts`` →
+#: ``Conversion failed!`` (yt-dlp #3138, Gentoo #846641); mkv is the documented
+#: workaround and accepts every YouTube codec. ``mp4`` stays first so the common
+#: h264+aac merge is unchanged; VP9/AV1+Opus merges fall through to mkv.
+MERGE_OUTPUT_FORMAT = "mp4/mkv"
 
 # ── capability sets (mirror the installed yt-dlp postprocessors) ─────────────
 
@@ -144,6 +164,16 @@ def _format_opts(settings: Settings, job: Job | None) -> dict[str, Any]:
     if job is not None and job.format_selector:
         return {"format": job.format_selector}
     return {"format": FORMAT_PRESETS.get(settings.default_format_preset, FORMAT_PRESETS["best"])}
+
+
+def _merge_opts() -> dict[str, Any]:
+    """Pin ``FFmpegMerger`` to a robust container preference (leaf 10.12).
+
+    ``merge_output_format`` is only consulted when yt-dlp actually merges two
+    formats, so it is harmless for a single-format (or audio-only) job. See
+    :data:`MERGE_OUTPUT_FORMAT` for why webm is excluded.
+    """
+    return {"merge_output_format": MERGE_OUTPUT_FORMAT}
 
 
 # ── subtitles (extra #8, leaf 10.5) ─────────────────────────────────────────
@@ -511,6 +541,7 @@ def build_ydl_opts(settings: Settings, job: Job | None = None) -> dict[str, Any]
     opts.update(_base_opts())
     opts.update(_paths_opts(settings))
     opts.update(_format_opts(settings, job))
+    opts.update(_merge_opts())
     opts.update(_playlist_opts(settings, job))
     opts.update(_network_opts(settings))
     opts.update(_js_opts(settings))

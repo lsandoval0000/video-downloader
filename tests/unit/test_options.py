@@ -74,6 +74,35 @@ def test_default_settings_full_build() -> None:
     assert "FFmpegEmbedSubtitle" not in [pp["key"] for pp in opts["postprocessors"]]
 
 
+# ── leaf 10.12: robust merge container (the "Conversion failed!" root cause) ──
+def test_media_pass_pins_robust_merge_container() -> None:
+    """The media pass must never let ``FFmpegMerger`` target webm (10.12).
+
+    Merging YouTube's VP9 (HFR) video + Opus audio into webm aborts ffmpeg with
+    ``non monotonically increasing dts`` → ``Conversion failed!`` (yt-dlp #3138 /
+    Gentoo #846641); the documented fix is to merge into mkv. ``mp4`` stays first
+    so the common h264+aac merge is unchanged.
+    """
+    opts = options.build_ydl_opts(make())
+    assert opts["merge_output_format"] == "mp4/mkv"
+    assert "webm" not in options.MERGE_OUTPUT_FORMAT
+    # The isolated subtitle pass never merges, so it must not carry the key.
+    assert "merge_output_format" not in options.build_subtitle_opts(make(write_subs=True))
+
+
+def test_merge_container_present_for_every_media_permutation() -> None:
+    """Every media-pass build pins the merge container, regardless of features."""
+    for overrides in (
+        {},
+        {"audio_only": True, "audio_codec": "mp3"},
+        {"video_container": "mp4"},
+        {"sponsorblock_enabled": True, "sponsorblock_categories": ["sponsor"]},
+        {"embed_thumbnail": True, "embed_metadata": True},
+    ):
+        opts = options.build_ydl_opts(make(**overrides))
+        assert opts["merge_output_format"] == options.MERGE_OUTPUT_FORMAT, overrides
+
+
 # ── permutation 2/3: audio-only extraction (extra #2) ────────────────────────
 def test_audio_only_mp3() -> None:
     opts = options.build_ydl_opts(make(audio_only=True, audio_codec="mp3"))
@@ -422,7 +451,7 @@ _OPTION_SHAPES: list[tuple[str, dict[str, object], dict[str, object]]] = [
     (
         "default",
         {},
-        {"format": "bv*+ba/b", "postprocessors": None},
+        {"format": "bv*+ba/b", "postprocessors": None, "merge_output_format": "mp4/mkv"},
     ),
     (
         "audio-only",
@@ -486,6 +515,8 @@ def test_exact_option_shape(fake_settings, case, overrides, expected) -> None:
     assert "download_archive" not in opts, case
     if "format" in expected:
         assert opts["format"] == expected["format"], case
+    if "merge_output_format" in expected:
+        assert opts["merge_output_format"] == expected["merge_output_format"], case
     if "postprocessors" in expected:
         if expected["postprocessors"] is None:
             assert "postprocessors" not in opts, case

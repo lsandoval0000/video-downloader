@@ -36,6 +36,11 @@ _SUBTITLE_429 = (
 #: A genuine media failure message.
 _MEDIA_FAIL = "ERROR: unable to download video data: HTTP Error 403: Forbidden"
 
+#: The exact user-reported fatal line (leaf 10.12). yt-dlp raises it when an
+#: ffmpeg post-processor (the merger / a converter / a sidecar) exits non-zero;
+#: ``Conversion failed!`` is ffmpeg's generic last stderr line.
+_CONVERSION_FAIL = "ERROR: Postprocessing: Conversion failed!"
+
 
 class _StubYDL:
     """A ``YoutubeDL`` stand-in that runs a per-pass action (or raises)."""
@@ -181,6 +186,91 @@ def test_media_error_with_output_finishes_with_warning(
 
     assert errors == []
     assert finished == [[str(media)]]
+
+
+def test_conversion_failure_with_media_is_non_fatal(
+    fake_settings, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A post-processing/conversion failure must not abort a completed download.
+
+    The user-reported ``ERROR: Postprocessing: Conversion failed!`` (leaf 10.12)
+    can come from a sidecar/conversion post-processor (thumbnail, metadata, a
+    container recode). When the media deliverable is already on disk that must be
+    a WARNING, not a fatal ``download failed``.
+    """
+    media = tmp_path / "clip.mkv"
+    media.write_bytes(b"media")
+
+    settings = fake_settings(download_dir=str(tmp_path))
+    worker = engine.DownloadWorker(settings, Job(id="jconv", url="https://example.com/v"))
+    worker._output_paths.append(str(media))
+    _install_ydl(monkeypatch, media=_raise(yt_dlp.utils.DownloadError(_CONVERSION_FAIL)))
+
+    finished, errors = _run(worker)
+
+    assert errors == [], "a conversion failure must not fail a job whose media exists"
+    assert finished == [[str(media)]]
+
+
+def test_post_conversion_failure_keeps_converted_deliverable(
+    fake_settings, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A PP failing right after a container conversion must not abort the job.
+
+    After ``FFmpegVideoConvertor`` produces the new file, only the *next* PP's
+    ``started`` hook carries that new path (the converter's own hooks carry the
+    soon-to-be-deleted source). If that next PP then fails, the converted
+    deliverable must still be visible to ``_media_paths()`` (leaf 10.12).
+    """
+    source = tmp_path / "clip.mkv"
+    source.write_bytes(b"old")
+    converted = tmp_path / "clip.mp4"
+    converted.write_bytes(b"converted")
+
+    settings = fake_settings(download_dir=str(tmp_path), video_container="mp4")
+    worker = engine.DownloadWorker(settings, Job(id="jc", url="https://example.com/v"))
+    # Emulate yt-dlp: the converter's hooks reported the (now deleted) source...
+    worker._output_paths.append(str(source))
+    source.unlink()
+    # ...then the next PP's "started" hook reported the converted file, and the
+    # PP failed (so no "finished" hook ever arrived for it).
+    worker._on_postprocess(
+        {
+            "status": "started",
+            "postprocessor": "EmbedThumbnail",
+            "info_dict": {"filepath": str(converted)},
+        }
+    )
+    _install_ydl(monkeypatch, media=_raise(yt_dlp.utils.DownloadError(_CONVERSION_FAIL)))
+
+    finished, errors = _run(worker)
+
+    assert errors == [], "the converted deliverable exists; the job must not fail"
+    assert finished == [[str(converted)]]
+
+
+def test_conversion_failure_without_media_is_still_fatal(
+    fake_settings, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same conversion error with NO deliverable is a genuine media failure.
+
+    This is the merge-failure shape: ``FFmpegMerger`` aborts, leaving only
+    un-merged ``.f<id>`` fragments, so there is no playable output — that stays
+    fatal (leaf 10.12 must not mask genuine media failures).
+    """
+    fragment = tmp_path / "clip [id].f397.mp4"
+    fragment.write_bytes(b"fragment")
+
+    settings = fake_settings(download_dir=str(tmp_path))
+    worker = engine.DownloadWorker(settings, Job(id="jconv2", url="https://example.com/v"))
+    worker._output_paths.append(str(fragment))
+    calls = _install_ydl(monkeypatch, media=_raise(yt_dlp.utils.DownloadError(_CONVERSION_FAIL)))
+
+    finished, errors = _run(worker)
+
+    assert finished == []
+    assert errors == [_CONVERSION_FAIL]
+    assert not any(c.get("skip_download") for c in calls), "no subtitle pass on a dead job"
 
 
 def test_sidecar_only_output_is_still_fatal(
