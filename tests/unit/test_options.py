@@ -69,11 +69,15 @@ def test_default_settings_full_build() -> None:
     """Out-of-the-box Settings (subs + thumb + metadata + archive + js on)."""
     opts = options.build_ydl_opts(Settings(download_dir=r"C:\dl"))
     assert opts["format"] == "bv*+ba/b"
-    assert opts["writesubtitles"] is True
     assert opts["writethumbnail"] is True
     assert [pp["key"] for pp in opts["postprocessors"]] == ["EmbedThumbnail", "FFmpegMetadata"]
     assert "download_archive" in opts
     assert "js_runtimes" in opts
+    # Subtitles are ISOLATED from the media pass (leaf 10.5): the media opts must
+    # never carry subtitle-write/embed keys, or yt-dlp would fetch subtitles first
+    # and a 429 could abort the job before the media was even merged.
+    assert "writesubtitles" not in opts
+    assert "FFmpegEmbedSubtitle" not in [pp["key"] for pp in opts["postprocessors"]]
 
 
 # ── permutation 2/3: audio-only extraction (extra #2) ────────────────────────
@@ -92,31 +96,50 @@ def test_audio_only_m4a() -> None:
     ]
 
 
-# ── permutation 4: subtitles write + embed (extra #8) ────────────────────────
-def test_subtitles_write_and_embed() -> None:
+# ── permutation 4: subtitles write + embed (extra #8, isolated 10.5) ─────────
+def test_media_pass_never_writes_or_embeds_subtitles() -> None:
+    """The media pass must be subtitle-free so a subtitle 429 cannot abort it."""
     opts = options.build_ydl_opts(make(write_subs=True, embed_subs=True, sub_langs=["en", "es"]))
+    for key in ("writesubtitles", "writeautomaticsub", "subtitleslangs", "subtitlesformat"):
+        assert key not in opts
+    assert "postprocessors" not in opts or "FFmpegEmbedSubtitle" not in [
+        pp["key"] for pp in opts["postprocessors"]
+    ]
+
+
+def test_subtitle_pass_writes_with_user_semantics() -> None:
+    """The isolated subtitle pass carries the user's language/format semantics."""
+    opts = options.build_subtitle_opts(
+        make(write_subs=True, embed_subs=True, sub_langs=["en", "es"])
+    )
     # VERIFIED (yt-dlp 2026.08.19): the key is `writesubtitles` (no underscore).
     assert opts["writesubtitles"] is True
     assert opts["writeautomaticsub"] is True
     assert opts["subtitleslangs"] == ["en", "es"]
     assert opts["subtitlesformat"] == "srt/best"
-    assert {"key": "FFmpegEmbedSubtitle"} in opts["postprocessors"]
+    # skip_download stops the pass re-downloading (or touching) the media file.
+    assert opts["skip_download"] is True
 
 
-def test_subtitles_absent_when_disabled() -> None:
-    opts = options.build_ydl_opts(make(write_subs=False, embed_subs=False))
-    assert "writesubtitles" not in opts
-    assert "subtitleslangs" not in opts
+def test_subtitle_pass_omits_archive_and_flat() -> None:
+    """The archive is omitted (phase 1 archived it) so the entry is not skipped."""
+    job = SimpleNamespace(format_selector=None, noplaylist=True, extract_flat=True)
+    opts = options.build_subtitle_opts(make(archive_enabled=True, write_subs=True), job)
+    assert "download_archive" not in opts
+    assert "extract_flat" not in opts
+    assert opts["noplaylist"] is True
+
+
+def test_subtitle_pass_empty_when_disabled() -> None:
+    assert options.build_subtitle_opts(make(write_subs=False, embed_subs=False)) == {}
 
 
 def test_subtitle_rate_limit_mitigation() -> None:
     """Subtitles set a modest inter-download pause to soften HTTP 429 bursts (10.5)."""
-    opts = options.build_ydl_opts(make(write_subs=True))
+    opts = options.build_subtitle_opts(make(write_subs=True))
     assert opts["sleep_interval_subtitles"] == 1.0
-    # Absent when subtitles are off, so the base opts stay minimal.
-    assert "sleep_interval_subtitles" not in options.build_ydl_opts(
-        make(write_subs=False, embed_subs=False)
-    )
+    # Absent from the media pass, so the base opts stay minimal.
+    assert "sleep_interval_subtitles" not in options.build_ydl_opts(make(write_subs=True))
 
 
 # ── permutation 5: sponsorblock (extra #10) ──────────────────────────────────
@@ -210,7 +233,6 @@ def test_postprocessor_order_is_semantic() -> None:
     assert [pp["key"] for pp in opts["postprocessors"]] == [
         "SponsorBlock",
         "FFmpegExtractAudio",
-        "FFmpegEmbedSubtitle",
         "ModifyChapters",
         "EmbedThumbnail",
         "FFmpegMetadata",
@@ -419,7 +441,7 @@ _OPTION_SHAPES: list[tuple[str, dict[str, object], dict[str, object]]] = [
     (
         "subtitles+embed",
         {"write_subs": True, "embed_subs": True, "sub_langs": ["en", "es"]},
-        {"postprocessors": [{"key": "FFmpegEmbedSubtitle"}]},
+        {"postprocessors": None},
     ),
     (
         "sponsorblock",

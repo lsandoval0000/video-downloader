@@ -14,10 +14,20 @@ Design constraints:
 * **Postprocessor order is semantic** and must not be reshuffled::
 
       SponsorBlock → (FFmpegExtractAudio | FFmpegVideoConvertor/Remuxer)
-      → FFmpegEmbedSubtitle → ModifyChapters → EmbedThumbnail → FFmpegMetadata
+      → ModifyChapters → EmbedThumbnail → FFmpegMetadata
 
   (``ModifyChapters`` performs the actual SponsorBlock cuts and is placed after
-  subtitle embedding / before metadata, mirroring yt-dlp's own CLI ordering.)
+  the container is final / before metadata, mirroring yt-dlp's own CLI ordering.)
+
+* **Subtitles are ISOLATED from the media job** (leaf 10.5 round 2). yt-dlp
+  writes subtitles *before* it downloads/merges the media, so a rate-limited
+  subtitle request (``HTTP 429``) raises ``DownloadError`` while **no media file
+  yet exists** — and the whole download is lost. The media pass built by
+  :func:`build_ydl_opts` therefore writes/embeds **no** subtitles (no
+  ``writesubtitles``/``writeautomaticsub``/``subtitleslangs``/``subtitlesformat``,
+  no ``FFmpegEmbedSubtitle`` PP); subtitles are acquired by a SEPARATE, optional,
+  non-fatal pass assembled by :func:`build_subtitle_opts` and only after the
+  media is finalised.
 
 * The ``FFmpegVideoConvertor`` key ``preferedformat`` (single ``r``) is the real
   upstream spelling — do **not** "fix" it.
@@ -27,7 +37,7 @@ rulings):
 
 * **Subtitles**: the option key is ``writesubtitles`` (no underscore) — the
   plan's ``write_subtitles`` is ignored by yt-dlp, which silently yields *no*
-  subtitles and makes ``FFmpegEmbedSubtitle`` no-op. Use the correct key.
+  subtitles. Use the correct key (see :func:`build_subtitle_opts`).
 * **SponsorBlock** (R-003): ``SponsorBlockPP`` takes ``categories`` (+ ``when``)
   and removal is the *separate* ``ModifyChapters`` PP. Do **not** reintroduce
   ``remove_sponsor_segments`` on ``SponsorBlock``.
@@ -135,14 +145,15 @@ def _format_opts(settings: Settings, job: Job | None) -> dict[str, Any]:
     return {"format": FORMAT_PRESETS.get(settings.default_format_preset, FORMAT_PRESETS["best"])}
 
 
-# ── subtitles (extra #8) ─────────────────────────────────────────────────────
+# ── subtitles (extra #8, leaf 10.5) ─────────────────────────────────────────
 
 
-def _subtitle_opts(settings: Settings) -> dict[str, Any]:
-    """Write and/or embed subtitles (extra #8).
+def _subtitle_write_opts(settings: Settings) -> dict[str, Any]:
+    """Subtitle WRITE options for the **isolated subtitle pass** (leaf 10.5).
 
-    ``writesubtitles`` (no underscore) is the real yt-dlp key — see the module
-    docstring; the plan's ``write_subtitles`` spelling is ignored by yt-dlp.
+    These keys must never appear in the media pass — see the module docstring.
+    ``writesubtitles`` (no underscore) is the real yt-dlp key; the plan's
+    ``write_subtitles`` spelling is ignored by yt-dlp.
     """
     if not (settings.write_subs or settings.embed_subs):
         return {}
@@ -156,6 +167,39 @@ def _subtitle_opts(settings: Settings) -> dict[str, Any]:
         # subtitle downloads softens bursts with no noticeable delay.
         "sleep_interval_subtitles": 1.0,
     }
+
+
+def build_subtitle_opts(settings: Settings, job: Job | None = None) -> dict[str, Any]:
+    """Return yt-dlp options for the **isolated, non-fatal subtitle pass** (10.5).
+
+    This is a *separate* yt-dlp invocation run *after* the media job has merged
+    its output, so a subtitle ``HTTP 429`` can never abort the media download:
+
+    * ``skip_download`` — never touches (re-downloads) the media file;
+    * the same output template/paths, so sidecars land next to the media;
+    * the user's language/format semantics, plus the same cookies/proxy/JS-runtime
+      so the subtitle request authenticates exactly like the media request.
+
+    Returns ``{}`` when subtitles are disabled (callers must not build a
+    ``YoutubeDL`` from an empty dict, which would download the media).
+    The download archive is deliberately **omitted**: phase 1 already archived the
+    video, and honouring the archive here would make yt-dlp skip the entry and
+    fetch no subtitles at all.
+    """
+    if not (settings.write_subs or settings.embed_subs):
+        return {}
+    opts: dict[str, Any] = {}
+    opts.update(_base_opts())
+    opts.update(_paths_opts(settings))
+    opts.update(_subtitle_write_opts(settings))
+    opts.update(_playlist_opts(settings, job))
+    opts.update(_network_opts(settings))
+    opts.update(_js_opts(settings))
+    # Obtain subtitles only; the media file already exists from the media pass.
+    opts["skip_download"] = True
+    # A flat probe must never leak into the subtitle pass (it yields no subtitles).
+    opts.pop("extract_flat", None)
+    return opts
 
 
 def available_subtitle_langs(info: Mapping[str, Any] | None) -> set[str]:
@@ -438,12 +482,10 @@ def _postprocessor_opts(settings: Settings) -> dict[str, Any]:
     if conversion is not None:
         postprocessors.append(conversion)
 
-    # 3) Subtitle muxing AFTER the container is final (extra #8).
-    if settings.embed_subs:
-        postprocessors.append({"key": "FFmpegEmbedSubtitle"})
-
-    # 3b) SponsorBlock segment REMOVAL. yt-dlp requires this after subtitle
-    #     embedding and before metadata/thumbnail muxing.
+    # 3) Subtitle embedding is NOT done here: subtitles are acquired by the
+    #    isolated, non-fatal pass (leaf 10.5) so their failure can never abort the
+    #    media download. The engine embeds them afterwards (see engine.py).
+    #    SponsorBlock segment REMOVAL still requires the container to be final.
     if remove_categories:
         postprocessors.append(
             {"key": "ModifyChapters", "remove_sponsor_segments": list(remove_categories)}
@@ -479,7 +521,6 @@ def build_ydl_opts(settings: Settings, job: Job | None = None) -> dict[str, Any]
     opts.update(_base_opts())
     opts.update(_paths_opts(settings))
     opts.update(_format_opts(settings, job))
-    opts.update(_subtitle_opts(settings))
     opts.update(_playlist_opts(settings, job))
     opts.update(_network_opts(settings))
     opts.update(_archive_opts(settings))
