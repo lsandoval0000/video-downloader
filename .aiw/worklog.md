@@ -267,3 +267,11 @@
 - Artifacts: `dist\VideoDownloader\VideoDownloader.exe` (rebuilt), `dist\VideoDownloader-portable-0.1.0.zip` (255.9 MB), `dist\checksums.sha256` (SHA-256 `88bb1209…e4fac`); unpacked 636.0 MB (≤700 MB per R-008). Remote `origin/master` == `eff6848`.
 - Still open: 10.1 manual 17-row matrix on a real desktop (the remaining GUI-observation rows); optional in-app playback (#17) check now that the surface is correctly parented. No stray `.aiw/plan-*.md` files exist (only `plan.md` + `worklog.md`).
 
+
+## [2026-10-11 12:22] builder - 10.3 (push): final tracking sync
+- Status: DONE
+- Summary: Committed the orchestrator's final tracking edits (.aiw/plan.md leaf 10.4 -> [x], .aiw/worklog.md closing A.L.L.I.C.E. entry) and pushed to origin/master. Only .aiw/ files were staged; no source or binary changes.
+- Files touched: .aiw/plan.md, .aiw/worklog.md (commit ec6e3d7).
+- Decisions: single-purpose docs(aiw) commit; staged exactly the two .aiw/ paths (never git add -A) to guarantee no gitignored artifacts leaked. Follow-up docs(worklog) commit records this entry (repo precedent).
+- Evidence: before push git status --short = M .aiw/plan.md / M .aiw/worklog.md only; push eff6848..ec6e3d7  HEAD -> master; after push git status --short EMPTY; git log --oneline -n 3 = ec6e3d7 / eff6848 / 17c3fa; git rev-parse HEAD == git rev-parse origin/master == ec6e3d7a2a9219b7e47126d40c10e22fdf3b634e.
+- Issues: none.
