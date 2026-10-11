@@ -103,3 +103,11 @@ def test_formats_from_info_playlist_uses_first_entry() -> None:
 def test_formats_from_info_empty() -> None:
     assert _formats_from_info(None) == []
     assert _formats_from_info({}) == []
+
+
+def test_sample_info_dict_fixture_drives_pure_helpers(sample_info_dict) -> None:
+    """The shared yt-dlp info fixture drives the pure format helpers."""
+    assert [f.id for f in _formats_from_info(sample_info_dict)] == ["137", "140", "18"]
+    assert format_selector("137", sample_info_dict) == "137+bestaudio/best"
+    assert format_selector("18", sample_info_dict) == "18/best"
+    assert format_selector("140", sample_info_dict) == "140/bestaudio/best"

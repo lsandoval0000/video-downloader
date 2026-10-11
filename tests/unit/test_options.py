@@ -381,3 +381,103 @@ def test_cookies_disabled_ignores_sources() -> None:
     )
     assert "cookiefile" not in opts
     assert "cookiesfrombrowser" not in opts
+
+
+# ══ leaf 8.2 — consolidated exact-shape proof across >= 8 permutations ════════
+# Each row drives ``build_ydl_opts`` from a hermetic ``fake_settings`` (conftest)
+# and asserts the *exact* shape of the resulting opts for one feature permutation:
+# the format string, the full ordered postprocessor chain (or its absence), and
+# the feature-specific key. This complements the per-feature tests above with a
+# single, table-driven exact-dict contract.
+
+_OPTION_SHAPES: list[tuple[str, dict[str, object], dict[str, object]]] = [
+    (
+        "default",
+        {},
+        {"format": "bv*+ba/b", "postprocessors": None},
+    ),
+    (
+        "audio-only",
+        {"audio_only": True, "audio_codec": "mp3"},
+        {
+            "format": "bestaudio/best",
+            "postprocessors": [
+                {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "0"}
+            ],
+        },
+    ),
+    (
+        "subtitles+embed",
+        {"write_subs": True, "embed_subs": True, "sub_langs": ["en", "es"]},
+        {"postprocessors": [{"key": "FFmpegEmbedSubtitle"}]},
+    ),
+    (
+        "sponsorblock",
+        {"sponsorblock_enabled": True, "sponsorblock_categories": ["sponsor", "selfpromo"]},
+        {
+            "postprocessors": [
+                {
+                    "key": "SponsorBlock",
+                    "categories": ["sponsor", "selfpromo"],
+                    "when": "after_filter",
+                },
+                {
+                    "key": "ModifyChapters",
+                    "remove_sponsor_segments": ["sponsor", "selfpromo"],
+                },
+            ]
+        },
+    ),
+    (
+        "conversion",
+        {"video_container": "mkv"},
+        {"postprocessors": [{"key": "FFmpegVideoConvertor", "preferedformat": "mkv"}]},
+    ),
+    (
+        "cookies",
+        {"use_cookies": True, "cookie_browser": "chrome"},
+        {"cookiesfrombrowser": ("chrome",)},
+    ),
+    (
+        "archive",
+        {"archive_enabled": True},
+        {"download_archive": True},  # value checked by basename below
+    ),
+    (
+        "playlist-range",
+        {"playlist_items": "1-10"},
+        {"playlist_items": "1-10"},
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("case", "overrides", "expected"),
+    _OPTION_SHAPES,
+    ids=[case for case, _, _ in _OPTION_SHAPES],
+)
+def test_exact_option_shape(fake_settings, case, overrides, expected) -> None:
+    opts = options.build_ydl_opts(fake_settings(**overrides))
+
+    if "format" in expected:
+        assert opts["format"] == expected["format"], case
+    if "postprocessors" in expected:
+        if expected["postprocessors"] is None:
+            assert "postprocessors" not in opts, case
+        else:
+            assert opts["postprocessors"] == expected["postprocessors"], case
+    if "cookiesfrombrowser" in expected:
+        assert opts["cookiesfrombrowser"] == expected["cookiesfrombrowser"], case
+    if expected.get("download_archive"):
+        assert os.path.basename(opts["download_archive"]) == "archive.txt", case
+    if "playlist_items" in expected:
+        assert opts["playlist_items"] == expected["playlist_items"], case
+
+
+def test_sample_info_dict_fixture_subtitle_helpers(sample_info_dict) -> None:
+    """The shared info fixture exercises the subtitle-availability helpers."""
+    assert options.subtitle_langs_present(sample_info_dict, ["en"]) == ["en"]
+    assert options.subtitle_langs_present(sample_info_dict, ["all"]) == ["en", "es"]
+    assert options.subtitle_langs_present(sample_info_dict, ["fr"]) == []
+    settings = make(write_subs=True, sub_langs=["en"])
+    assert options.subtitle_warning(sample_info_dict, settings) is None

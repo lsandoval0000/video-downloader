@@ -88,3 +88,17 @@ def test_preset_crud_and_persistence(tmp_path: Path) -> None:
     assert reloaded.delete_preset("Music") is True
     assert reloaded.delete_preset("Music") is False
     assert [p.name for p in reloaded.list_presets()] == ["Video 1080p"]
+
+
+def test_config_store_uses_tmp_config_dir(tmp_config_dir) -> None:
+    """The shared ``tmp_config_dir`` fixture yields an isolated user-data dir."""
+    path = tmp_config_dir / "config.json"
+    store = ConfigStore(path).load()
+    store.set("download_dir", r"D:\media")
+    store.set("max_concurrent", 3)
+    store.save()
+
+    reloaded = ConfigStore(path).load()
+    assert reloaded.get("download_dir") == r"D:\media"
+    assert reloaded.get("max_concurrent") == 3
+    assert tmp_config_dir.is_dir()
