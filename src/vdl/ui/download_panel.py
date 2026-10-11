@@ -51,6 +51,10 @@ log = logging.getLogger("vdl.ui.download_panel")
 _DEFAULT = "__default__"
 _CUSTOM = "__custom__"
 
+#: Non-blocking "seen before" hint prefix (leaf 10.8). The URL is still enqueued —
+#: the app always (re-)downloads, so this is purely informational.
+_PREVIOUSLY_DOWNLOADED = "Previously downloaded \u2014 will download again: "
+
 #: Format combo entries (label shown -> preset key or sentinel).
 _FORMAT_CHOICES: tuple[tuple[str, str], ...] = (
     ("Default (from settings)", _DEFAULT),
@@ -318,8 +322,10 @@ class DownloadPanel(QWidget):
         urls = extract_urls(self._urls.toPlainText())
         known = [url for url in urls if self._known_checker(url)]
         if known:
-            self._hint.setText("Already downloaded: " + ", ".join(known))
-        elif self._hint.text().startswith("Already downloaded"):
+            # Purely informational (leaf 10.8): the URL is still queued by
+            # ``_on_download`` — the app always downloads.
+            self._hint.setText(_PREVIOUSLY_DOWNLOADED + ", ".join(known))
+        elif self._hint.text().startswith(_PREVIOUSLY_DOWNLOADED):
             self._hint.clear()
 
     def reload_from_settings(self) -> None:

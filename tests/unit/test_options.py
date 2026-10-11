@@ -16,12 +16,6 @@ from vdl.core import options
 from vdl.paths import deno_exe, ffmpeg_exe
 
 
-@pytest.fixture(autouse=True)
-def _isolate_archive(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-    """Keep ``archive_path`` off the real user-data dir (hermetic tests)."""
-    monkeypatch.setattr(options, "archive_path", lambda: str(tmp_path / "archive.txt"))
-
-
 def make(**overrides: object) -> Settings:
     """A minimal, quiet Settings with all optional features off by default."""
     base: dict[str, object] = {
@@ -32,7 +26,6 @@ def make(**overrides: object) -> Settings:
         "embed_thumbnail": False,
         "embed_metadata": False,
         "sponsorblock_enabled": False,
-        "archive_enabled": False,
         "js_runtime_enabled": False,
         "use_cookies": False,
         "cookie_browser": None,
@@ -66,12 +59,13 @@ def test_base_keys_and_values() -> None:
 
 
 def test_default_settings_full_build() -> None:
-    """Out-of-the-box Settings (subs + thumb + metadata + archive + js on)."""
+    """Out-of-the-box Settings (subs + thumb + metadata + js on)."""
     opts = options.build_ydl_opts(Settings(download_dir=r"C:\dl"))
     assert opts["format"] == "bv*+ba/b"
     assert opts["writethumbnail"] is True
     assert [pp["key"] for pp in opts["postprocessors"]] == ["EmbedThumbnail", "FFmpegMetadata"]
-    assert "download_archive" in opts
+    # Leaf 10.8: the download archive is NEVER injected — a URL always downloads.
+    assert "download_archive" not in opts
     assert "js_runtimes" in opts
     # Subtitles are ISOLATED from the media pass (leaf 10.5): the media opts must
     # never carry subtitle-write/embed keys, or yt-dlp would fetch subtitles first
@@ -122,9 +116,9 @@ def test_subtitle_pass_writes_with_user_semantics() -> None:
 
 
 def test_subtitle_pass_omits_archive_and_flat() -> None:
-    """The archive is omitted (phase 1 archived it) so the entry is not skipped."""
+    """The subtitle pass never carries an archive, so its entry is never skipped."""
     job = SimpleNamespace(format_selector=None, noplaylist=True, extract_flat=True)
-    opts = options.build_subtitle_opts(make(archive_enabled=True, write_subs=True), job)
+    opts = options.build_subtitle_opts(make(write_subs=True), job)
     assert "download_archive" not in opts
     assert "extract_flat" not in opts
     assert opts["noplaylist"] is True
@@ -178,14 +172,16 @@ def test_cookies_absent_when_disabled() -> None:
     assert "cookiesfrombrowser" not in options.build_ydl_opts(make(use_cookies=False))
 
 
-# ── permutation 8: archive (extra #14 engine) ────────────────────────────────
-def test_archive_enabled_injects_path(tmp_path) -> None:
-    opts = options.build_ydl_opts(make(archive_enabled=True))
-    assert opts["download_archive"] == str(tmp_path / "archive.txt")
+# ── permutation 8: always download — archive NEVER injected (leaf 10.8) ──────
+def test_build_opts_never_injects_download_archive() -> None:
+    """Building opts must NEVER yield a ``download_archive`` (always re-download).
 
-
-def test_archive_disabled_absent() -> None:
-    assert "download_archive" not in options.build_ydl_opts(make(archive_enabled=False))
+    yt-dlp would otherwise SKIP an already-archived id and produce no file. The
+    app-level "previously downloaded" hint is cosmetic only — it never blocks.
+    """
+    assert "download_archive" not in options.build_ydl_opts(make())
+    # Even the out-of-the-box defaults (which used to enable the archive) must not.
+    assert "download_archive" not in options.build_ydl_opts(Settings(download_dir=r"C:\dl"))
 
 
 # ── permutation 9: playlist range + per-job overrides (extra #3) ─────────────
@@ -471,11 +467,6 @@ _OPTION_SHAPES: list[tuple[str, dict[str, object], dict[str, object]]] = [
         {"cookiesfrombrowser": ("chrome",)},
     ),
     (
-        "archive",
-        {"archive_enabled": True},
-        {"download_archive": True},  # value checked by basename below
-    ),
-    (
         "playlist-range",
         {"playlist_items": "1-10"},
         {"playlist_items": "1-10"},
@@ -491,6 +482,8 @@ _OPTION_SHAPES: list[tuple[str, dict[str, object], dict[str, object]]] = [
 def test_exact_option_shape(fake_settings, case, overrides, expected) -> None:
     opts = options.build_ydl_opts(fake_settings(**overrides))
 
+    # Leaf 10.8: no permutation may ever inject a download archive.
+    assert "download_archive" not in opts, case
     if "format" in expected:
         assert opts["format"] == expected["format"], case
     if "postprocessors" in expected:
@@ -500,8 +493,6 @@ def test_exact_option_shape(fake_settings, case, overrides, expected) -> None:
             assert opts["postprocessors"] == expected["postprocessors"], case
     if "cookiesfrombrowser" in expected:
         assert opts["cookiesfrombrowser"] == expected["cookiesfrombrowser"], case
-    if expected.get("download_archive"):
-        assert os.path.basename(opts["download_archive"]) == "archive.txt", case
     if "playlist_items" in expected:
         assert opts["playlist_items"] == expected["playlist_items"], case
 

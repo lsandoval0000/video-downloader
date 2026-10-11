@@ -118,10 +118,6 @@ class SettingsDialog(QDialog):
         self._playlist_items.setPlaceholderText("e.g. 1-10 (leave empty for all)")
         form.addRow("Playlist items", self._playlist_items)
 
-        self._archive = QCheckBox("Remember downloaded videos (skip duplicates)", page)
-        self._archive.setChecked(settings.archive_enabled)
-        form.addRow("Download archive", self._archive)
-
         return page
 
     def _build_processing_tab(self, settings) -> QWidget:
@@ -257,7 +253,6 @@ class SettingsDialog(QDialog):
         settings.max_concurrent = max(1, int(self._max_concurrent.value()))
         settings.default_format_preset = self._format_preset.currentData() or "best"
         settings.playlist_items = self._playlist_items.text().strip() or None
-        settings.archive_enabled = self._archive.isChecked()
 
         settings.audio_only = self._audio_only.isChecked()
         settings.audio_codec = self._audio_codec.currentData() or "mp3"

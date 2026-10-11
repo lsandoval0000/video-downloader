@@ -59,7 +59,6 @@ def test_engine_downloads_short_video(tmp_path: Path) -> None:
         embed_subs=False,
         embed_thumbnail=False,
         embed_metadata=False,
-        archive_enabled=False,
         # Exercise the deno / yt-dlp-ejs path (the whole point of the gotcha).
         js_runtime_enabled=True,
     )

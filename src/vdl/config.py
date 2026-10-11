@@ -47,7 +47,6 @@ class Settings:
     use_cookies: bool = False
     cookie_browser: str | None = None  # chrome|edge|firefox|brave|opera|vivaldi
     cookie_file: str | None = None  # explicit cookies.txt path (extra #11)
-    archive_enabled: bool = True
     playlist_items: str | None = None  # "1-10"
     notify_on_complete: bool = True
     clipboard_watch: bool = True

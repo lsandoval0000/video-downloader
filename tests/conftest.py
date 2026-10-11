@@ -93,7 +93,6 @@ _QUIET_OVERRIDES: dict[str, Any] = {
     "embed_thumbnail": False,
     "embed_metadata": False,
     "sponsorblock_enabled": False,
-    "archive_enabled": False,
     "js_runtime_enabled": False,
     "use_cookies": False,
     "cookie_browser": None,

@@ -8,9 +8,10 @@ into here rather than duplicating dicts.
 Design constraints:
 
 * **No Qt, no network, no download I/O** — importable and testable headless.
-* The only filesystem side effect is :func:`vdl.core.history.archive_path`, which
-  resolves (and lazily creates) the user-data directory; unit tests monkeypatch
-  it. (It moved to ``core/history.py`` in leaf 4.2 and is re-exported by name.)
+* **No filesystem side effects.** The download archive is deliberately NOT
+  injected (leaf 10.8): every URL is always (re-)downloaded, never skipped as
+  "already downloaded". :func:`vdl.core.history.archive_path` is still re-exported
+  (below) for callers that only *read* the archive.
 * **Postprocessor order is semantic** and must not be reshuffled::
 
       SponsorBlock → (FFmpegExtractAudio | FFmpegVideoConvertor/Remuxer)
@@ -52,7 +53,7 @@ from typing import TYPE_CHECKING, Any
 
 from vdl.core import cookies
 from vdl.core.formats import FORMAT_PRESETS
-from vdl.core.history import archive_path  # re-exported; injected as download_archive
+from vdl.core.history import archive_path as archive_path  # re-export (read-only helper)
 from vdl.paths import deno_exe, ffmpeg_exe
 
 if TYPE_CHECKING:
@@ -182,9 +183,9 @@ def build_subtitle_opts(settings: Settings, job: Job | None = None) -> dict[str,
 
     Returns ``{}`` when subtitles are disabled (callers must not build a
     ``YoutubeDL`` from an empty dict, which would download the media).
-    The download archive is deliberately **omitted**: phase 1 already archived the
-    video, and honouring the archive here would make yt-dlp skip the entry and
-    fetch no subtitles at all.
+    The download archive is deliberately **omitted**: the media pass never injects
+    one (leaf 10.8), and honouring an archive here would make yt-dlp skip the
+    entry and fetch no subtitles at all.
     """
     if not (settings.write_subs or settings.embed_subs):
         return {}
@@ -332,18 +333,7 @@ def _network_opts(settings: Settings) -> dict[str, Any]:
     return opts
 
 
-# ── archive / history (extra #14, engine) ────────────────────────────────────
-
-
-def _archive_opts(settings: Settings) -> dict[str, Any]:
-    """Download archive to skip already-downloaded videos (extra #14, engine).
-
-    Uses :func:`vdl.core.history.archive_path` (imported above); tests monkeypatch
-    the module-level name to stay off the real user-data dir.
-    """
-    if settings.archive_enabled:
-        return {"download_archive": archive_path()}
-    return {}
+# ── JS runtime / network helpers ─────────────────────────────────────────────
 
 
 def _js_opts(settings: Settings) -> dict[str, Any]:
@@ -523,7 +513,6 @@ def build_ydl_opts(settings: Settings, job: Job | None = None) -> dict[str, Any]
     opts.update(_format_opts(settings, job))
     opts.update(_playlist_opts(settings, job))
     opts.update(_network_opts(settings))
-    opts.update(_archive_opts(settings))
     opts.update(_js_opts(settings))
     # Applied last so the semantic postprocessor order is never clobbered.
     opts.update(_postprocessor_opts(settings))

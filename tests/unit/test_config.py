@@ -65,6 +65,33 @@ def test_incompatible_settings_recovery(tmp_path: Path) -> None:
     assert store.get("max_concurrent") == 2
 
 
+def test_legacy_archive_enabled_key_is_ignored(tmp_path: Path) -> None:
+    """An OLD config.json carrying the removed ``archive_enabled`` still loads.
+
+    Leaf 10.8 removed the archive toggle; ``_coerce_settings`` must drop the
+    now-unknown key instead of raising (the app must never fail to start).
+    """
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps(
+            {
+                "settings": {
+                    "archive_enabled": True,
+                    "download_dir": r"C:\old",
+                    "max_concurrent": 4,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = ConfigStore(path).load()
+    assert store.get("download_dir") == r"C:\old"
+    assert store.get("max_concurrent") == 4
+    # The key is gone from the model entirely (no attribute, no getter value).
+    assert not hasattr(store.settings, "archive_enabled")
+    assert store.get("archive_enabled", "absent") == "absent"
+
+
 def test_preset_crud_and_persistence(tmp_path: Path) -> None:
     path = tmp_path / "config.json"
     store = ConfigStore(path).load()
