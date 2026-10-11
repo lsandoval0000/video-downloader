@@ -367,3 +367,10 @@
 - Artifacts: `dist\VideoDownloader\` rebuilt, `dist\VideoDownloader-portable-0.1.0.zip` (255.94 MiB) + `dist\checksums.sha256` (SHA-256 `20a766ac…c79d8fa8`); unpacked 635.97 MiB (≤700 per R-008). Remote `origin/master` == `db52e9c`. Unit tests: 174 passed. Frozen bytecode + bundled-ffmpeg ffprobe verified.
 - Accepted limitation: SponsorBlock-removal + Embed-subtitles both on ⇒ possible subtitle drift (SponsorBlock off by default).
 - Still open: 10.1 manual 17-row matrix (GUI observations) incl. live in-app playback. No stray `.aiw/plan-*.md` files.
+
+## [2026-10-11 15:16] builder — 10.3 (push): final tracking sync after 10.5 round 2
+- Status: DONE
+- Summary: Committed the two uncommitted tracking edits (`plan.md` leaf 10.5 → `[x]` + `worklog.md` closing record) and pushed to `origin/master`. Commit `056c148` (`docs(aiw): finalize 10.5 round-2 status + session record`), 2 files / +16 −1. `HEAD == origin/master == 056c148`. Working tree clean after push.
+- Files touched: `.aiw/plan.md`, `.aiw/worklog.md` (this entry), none else.
+- Decisions: Pre-commit `git status --short` showed ONLY `.aiw/plan.md` + `.aiw/worklog.md` modified → nothing unrelated staged. Committed with the briefed message. Used `;`-separated commands (PowerShell 5.1 has no `&&`).
+- Issues: Shell clock reports `-0500` (14:16) while the surrounding journal entries follow a `-0400` convention (15:10/15:15); this entry uses the journal's convention for chronological consistency — same real instant. No other issues.
