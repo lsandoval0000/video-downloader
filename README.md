@@ -3,7 +3,7 @@
 A light, **portable, no-install** Windows desktop app to download video/audio from
 any site that [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) supports, preview media
 instantly, and manage a full workflow (queue, formats, subtitles, SponsorBlock,
-scheduling, history) — without an installer, a registry footprint, or a browser
+history) — without an installer, a registry footprint, or a browser
 plugin.
 
 It ships as a **PyInstaller onedir folder** that runs offline: `yt-dlp` is used
@@ -40,9 +40,9 @@ in the window.
 
 One folder you can zip, copy to a USB stick, unzip anywhere (including
 `C:\Program Files` or a network share) and double-click. No registry writes, no
-installer, no admin rights. All state — settings, presets, history, the download
-archive, logs — lives in a **portable user-data directory** (next to the app in
-portable mode, or under `%LOCALAPPDATA%\VideoDownloader` otherwise).
+installer, no admin rights. All state — settings, presets, history, logs — lives
+in a **portable user-data directory** (next to the app in portable mode, or under
+`%LOCALAPPDATA%\VideoDownloader` otherwise).
 
 | Piece | Role |
 |-------|------|
@@ -55,7 +55,7 @@ portable mode, or under `%LOCALAPPDATA%\VideoDownloader` otherwise).
 
 ## Features
 
-All 17 requested extras are implemented:
+16 of the 17 requested extras are implemented:
 
 1. **Format / quality picker** — quality presets (Best, 1080p, 720p, Audio only,
    Smallest) plus a *Fetch formats…* dialog that lists every format for a URL.
@@ -71,7 +71,9 @@ All 17 requested extras are implemented:
 7. **Clipboard auto-detect** — copying a video URL pre-fills the input (never
    steals focus, never overwrites what you are typing); toggleable in Settings.
 8. **Subtitles download / embed** — write `.srt` sidecar files and/or mux
-   subtitles into the container, with selectable languages.
+   subtitles into the container, with selectable languages. Subtitles are
+   fetched in a **separate, non-fatal pass** after the media, so a subtitle
+   failure (e.g. a YouTube caption rate-limit) never aborts the download.
 9. **Thumbnail + metadata embedding** — embed the cover image and title/artist/
    date tags into the output file.
 10. **SponsorBlock removal** — cut sponsor/self-promo/… segments from marked
@@ -80,17 +82,19 @@ All 17 requested extras are implemented:
     Brave, Opera, Vivaldi (or a `cookies.txt` file) for login-walled videos.
 12. **Format conversion** — target a container/codec (e.g. → mp4, mkv, webm,
     mp3, opus); remux-only (fast stream copy) is available instead of re-encode.
-13. **Scheduler** — queue a download for a specific date/time or a daily repeat.
-14. **History via download archive** — `yt-dlp`'s append-only `archive.txt`
-    skips already-downloaded videos, and a SQLite `history.db` backs the History
-    table (browse, reopen in the player, clear).
-15. **Presets** — save the current download options as a named preset, load it
+13. **History** — every download is recorded in a SQLite `history.db` that backs
+    the History table (browse, reopen in the player, clear). Re-pasting a known
+    URL shows a *“previously downloaded — will download again”* hint; it never
+    skips the download.
+14. **Presets** — save the current download options as a named preset, load it
     later, delete it; presets persist across restarts.
-16. **Notifications** — a Windows tray balloon when a download finishes or fails,
+15. **Notifications** — a Windows tray balloon when a download finishes or fails,
     with a click-to-play action and a “Do not disturb” toggle.
-17. **Embedded player (libmpv)** — the downloaded file plays **inside the app**
-    (not an external player) with seek, volume, mute, fullscreen, speed and
-    audio/subtitle track selection.
+16. **Embedded player (libmpv)** — the downloaded file plays **inside the app**
+    (not an external player) with seek, volume, mute, speed and audio/subtitle
+    track selection. The ⛶ button (or `F`) fullscreens the **video** — the
+    surrounding chrome is hidden while the transport controls stay visible — and
+    `Esc` returns to the windowed layout.
 
 ## Requirements
 
@@ -205,14 +209,12 @@ Files inside the user-data directory:
 | File | Purpose |
 |------|---------|
 | `config.json` | Settings + saved presets (written atomically; corrupt files fall back to defaults). |
-| `archive.txt` | `yt-dlp`’s **append-only** download archive (one video id per line). Its source of truth — the app only ever *reads* it. |
-| `history.db` | Rich **SQLite** index backing the History view (title, url, path, status, timestamp). Deliberately separate from `archive.txt`. |
-| `schedules.json` | Scheduled download items (date/time, repeat, status). |
+| `history.db` | Rich **SQLite** index backing the History view (title, url, path, status, timestamp). It records what was downloaded; it never prevents a re-download. |
 | `logs\vdl.log` | Rotating log (2 MB, 3 backups). The full traceback of any crash lands here. |
 
-> `archive.txt` and `history.db` are **not** merged: the archive stays
-> byte-compatible with `yt-dlp` (that’s what makes “already downloaded” work),
-> while `history.db` is the richer index the UI browses.
+> There is **no “already downloaded” skip**: the same URL always downloads
+> again. `history.db` only records what happened and is what the History view
+> browses.
 
 ## Bundled third-party binaries & licences
 
@@ -257,7 +259,7 @@ $env:VDL_RUN_INTEGRATION = "1"
 python -m pytest tests/integration -q -m integration
 ```
 
-As last verified, `pytest tests/unit -q` reports **147 passed**, and the opt-in
+As last verified, `pytest tests/unit -q` reports **152 passed**, and the opt-in
 integration run reports **3 passed** (the integration suite covers a real
 download and the frozen `--selftest` smoke check).
 
@@ -274,14 +276,15 @@ writing:
   wiring is verified, the visible balloon is not.
 - **Clipboard auto-fill from a real browser copy** — the predicate and signal
   path are verified offscreen; a real browser copy has not been confirmed.
-- **Live ≥4×/s progress update rate and a live scheduler firing across a real
-  app restart** — the components are verified individually offscreen.
+- **Video fullscreen on a real desktop** — the chrome-hiding, transport-stays-
+  visible and `Esc`-to-exit logic is verified offscreen; the actual
+  video-fills-the-screen visual has not been confirmed on a live desktop.
 
 Each of these is a manual check on a real Windows desktop; see
 [docs/USAGE.md](docs/USAGE.md) for the per-feature steps.
 
 ## Documentation
 
-- **[docs/USAGE.md](docs/USAGE.md)** — how to use each of the 17 features, step by step.
+- **[docs/USAGE.md](docs/USAGE.md)** — how to use each feature, step by step.
 - **[docs/BUILD.md](docs/BUILD.md)** — the fetch script, the PyInstaller spec, binary mapping and exact build commands.
 - **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** — black player, YouTube “JS runtime missing”, Chrome cookie lock, subprocess DLL errors, antivirus false positives.

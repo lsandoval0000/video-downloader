@@ -53,7 +53,6 @@ from PySide6.QtWidgets import (
 from vdl.config import ConfigStore
 from vdl.core.history import STATUS_CANCELLED, STATUS_DONE, STATUS_ERROR, HistoryStore
 from vdl.core.queue import Job, JobState
-from vdl.core.scheduler import Scheduler
 from vdl.player.widget import VideoPlayerWidget
 from vdl.ui.clipboard import ClipboardWatcher
 from vdl.ui.download_panel import DownloadPanel
@@ -62,7 +61,6 @@ from vdl.ui.notifications import Notifier
 from vdl.ui.player_bar import PlayerBar
 from vdl.ui.presets_view import PresetsView
 from vdl.ui.queue_view import QueueView, UiDownloadQueue
-from vdl.ui.scheduler_view import SchedulerView
 from vdl.ui.settings_dialog import SettingsDialog
 
 log = logging.getLogger("vdl.ui.main_window")
@@ -122,6 +120,13 @@ class MainWindow(QMainWindow):
         self.history = HistoryStore()
         self._history_view: HistoryView | None = None
 
+        # Video fullscreen state (leaf 10.10): remembered chrome visibility and
+        # splitter sizes so exiting fullscreen restores the exact prior layout.
+        self._player_fullscreen = False
+        self._fs_state: dict[str, bool] = {}
+        self._fs_splitter_sizes: list[int] = []
+        self._fs_right_splitter_sizes: list[int] = []
+
         self._icon = _make_icon()
         self.setWindowIcon(self._icon)
 
@@ -129,8 +134,6 @@ class MainWindow(QMainWindow):
         self._build_actions()
         self._build_tray()
 
-        # Extras #7 / #13 / #16: clipboard watcher, schedule poller, notifier.
-        self.scheduler = Scheduler(self.queue, parent=self)
         self.notifier = Notifier(self.tray, self.config, self)
         self.clipboard = ClipboardWatcher(
             self, enabled_getter=lambda: self.config.settings.clipboard_watch
@@ -142,8 +145,7 @@ class MainWindow(QMainWindow):
         self.queue.job_finished.connect(self._on_job_finished)
         self.queue_view.play_requested.connect(self._play_path)
         self.clipboard.url_detected.connect(self._on_clipboard_url)
-        self.scheduler.item_fired.connect(self._on_scheduled_fired)
-        self.scheduler.item_missed.connect(self._on_scheduled_missed)
+        self._player.fullscreen_requested.connect(self._toggle_player_fullscreen)
         self.download_panel.set_known_checker(lambda url: is_known_url(self.history, url))
 
         self.statusBar().showMessage("Ready")
@@ -210,7 +212,6 @@ class MainWindow(QMainWindow):
         self.action_reset_layout = self._make_action("Reset layout", self._reset_layout)
         self.action_history = self._make_action("Open history\u2026", self._open_history)
         self.action_presets = self._make_action("Manage presets\u2026", self._open_presets)
-        self.action_scheduler = self._make_action("Open scheduler\u2026", self._open_scheduler)
         self.action_settings = self._make_action(
             "Preferences\u2026", self._open_settings, shortcut="Ctrl+,"
         )
@@ -239,7 +240,6 @@ class MainWindow(QMainWindow):
 
         menu_bar.addMenu("&History").addAction(self.action_history)
         menu_bar.addMenu("&Presets").addAction(self.action_presets)
-        menu_bar.addMenu("&Scheduler").addAction(self.action_scheduler)
 
         settings_menu = menu_bar.addMenu("&Settings")
         settings_menu.addAction(self.action_settings)
@@ -251,13 +251,13 @@ class MainWindow(QMainWindow):
         help_menu.addAction(self.action_about)
 
         toolbar = self.addToolBar("Main")
+        self._toolbar = toolbar
         toolbar.setMovable(False)
         toolbar.addAction(self.action_add_urls)
         toolbar.addAction(self.action_open_file)
         toolbar.addSeparator()
         toolbar.addAction(self.action_history)
         toolbar.addAction(self.action_presets)
-        toolbar.addAction(self.action_scheduler)
         toolbar.addAction(self.action_settings)
 
     def _build_tray(self) -> None:
@@ -268,7 +268,6 @@ class MainWindow(QMainWindow):
         show_action.triggered.connect(self._toggle_visible)
         menu.addAction(self.action_open_file)
         menu.addSeparator()
-        menu.addAction(self.action_scheduler)
         menu.addAction(self.action_dnd)
         menu.addSeparator()
         menu.addAction(self.action_quit)
@@ -287,13 +286,20 @@ class MainWindow(QMainWindow):
             ("Space", self._player.toggle_pause),
             ("Left", lambda: self._player.seek(-_SEEK_STEP)),
             ("Right", lambda: self._player.seek(_SEEK_STEP)),
-            ("F", self._player.toggle_fullscreen),
+            ("F", self._toggle_player_fullscreen),
             ("M", self._player.toggle_mute),
         )
         for sequence, slot in bindings:
             shortcut = QShortcut(QKeySequence(sequence), self)
             shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
             shortcut.activated.connect(_guard(slot))
+
+        # Esc exits the video fullscreen (leaf 10.10). Enabled only while
+        # fullscreen so it never swallows Esc from other widgets otherwise.
+        self._escape_shortcut = QShortcut(QKeySequence("Esc"), self)
+        self._escape_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        self._escape_shortcut.setEnabled(False)
+        self._escape_shortcut.activated.connect(self._exit_player_fullscreen)
 
     def _play_path(self, path: str) -> None:
         if not path:
@@ -373,6 +379,70 @@ class MainWindow(QMainWindow):
         self._splitter.setSizes([360, 840])
         self._right_splitter.setSizes([460, 320])
 
+    # ── player fullscreen (leaf 10.10) ───────────────────────────────────────
+    def _toggle_player_fullscreen(self) -> None:
+        """Toggle a video-focused fullscreen (leaf 10.10).
+
+        Option A: the *existing* top-level window is fullscreened while the
+        surrounding chrome is hidden, so the video fills the screen and the
+        transport bar (a permanent sibling inside ``_player_container``) stays
+        visible and usable. No native widget is reparented, so the leaf-10.4
+        native video surface (and libmpv's ``wid``) is left exactly as-is.
+        """
+        if self._player_fullscreen:
+            self._exit_player_fullscreen()
+        else:
+            self._enter_player_fullscreen()
+
+    def _enter_player_fullscreen(self) -> None:
+        """Hide the surrounding chrome and fullscreen the window.
+
+        The current chrome visibility and splitter proportions are remembered so
+        :meth:`_exit_player_fullscreen` restores the prior windowed layout.
+        """
+        self._fs_state = {
+            "menu_bar": self.menuBar().isVisible(),
+            "toolbar": self._toolbar.isVisible(),
+            "status_bar": self.statusBar().isVisible(),
+            "download_panel": self.download_panel.isVisible(),
+            "queue_view": self.queue_view.isVisible(),
+            "player_container": self._player_container.isVisible(),
+        }
+        self._fs_splitter_sizes = self._splitter.sizes()
+        self._fs_right_splitter_sizes = self._right_splitter.sizes()
+
+        self.menuBar().setVisible(False)
+        self._toolbar.setVisible(False)
+        self.statusBar().setVisible(False)
+        self.download_panel.setVisible(False)
+        self.queue_view.setVisible(False)
+        self._player_container.setVisible(True)
+
+        self._player_fullscreen = True
+        self._escape_shortcut.setEnabled(True)
+        self.showFullScreen()
+
+    def _exit_player_fullscreen(self) -> None:
+        """Leave fullscreen and restore the exact prior windowed layout."""
+        if not self._player_fullscreen:
+            return
+        self._player_fullscreen = False
+        self._escape_shortcut.setEnabled(False)
+        self.showNormal()
+
+        state = self._fs_state
+        self.menuBar().setVisible(state.get("menu_bar", True))
+        self._toolbar.setVisible(state.get("toolbar", True))
+        self.statusBar().setVisible(state.get("status_bar", True))
+        self.download_panel.setVisible(state.get("download_panel", True))
+        self.queue_view.setVisible(state.get("queue_view", True))
+        self._player_container.setVisible(state.get("player_container", True))
+
+        if self._fs_splitter_sizes:
+            self._splitter.setSizes(self._fs_splitter_sizes)
+        if self._fs_right_splitter_sizes:
+            self._right_splitter.setSizes(self._fs_right_splitter_sizes)
+
     def _open_settings(self) -> None:
         dialog = SettingsDialog(self.config, self)
         if dialog.exec():
@@ -390,7 +460,6 @@ class MainWindow(QMainWindow):
             "embedded libmpv player.",
         )
 
-    # ── views: history / presets / scheduler (extras #13–15) ─────────────────
     def _open_history(self) -> None:
         if self._history_view is None:
             self._history_view = HistoryView(
@@ -408,21 +477,10 @@ class MainWindow(QMainWindow):
         dialog.exec()
         self.download_panel.reload_from_settings()
 
-    def _open_scheduler(self) -> None:
-        dialog = SchedulerView(self.scheduler, self)
-        dialog.exec()
-
-    # ── clipboard + scheduler slots (extras #7, #13) ─────────────────────────
     def _on_clipboard_url(self, url: str) -> None:
         if self.download_panel.append_url(url):
             self.download_panel.show_clipboard_hint()
             self.statusBar().showMessage("URL detected on the clipboard.", 4000)
-
-    def _on_scheduled_fired(self, item) -> None:
-        self.statusBar().showMessage(f"Scheduled download started: {item.url}", 5000)
-
-    def _on_scheduled_missed(self, item) -> None:
-        self.statusBar().showMessage(f"Scheduled item missed while closed: {item.url}", 8000)
 
     # ── notification toggles (extra #16) ─────────────────────────────────────
     def _toggle_dnd(self, enabled: bool) -> None:
@@ -448,10 +506,6 @@ class MainWindow(QMainWindow):
 
     # ── lifecycle ────────────────────────────────────────────────────────────
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt override
-        try:
-            self.scheduler.stop()
-        except Exception:  # pragma: no cover - teardown must never fail
-            log.exception("could not stop the scheduler")
         try:
             self.tray.hide()
         except Exception:  # pragma: no cover - teardown must never fail

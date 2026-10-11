@@ -248,7 +248,7 @@ $env:VDL_RUN_INTEGRATION = "1"
 python -m pytest tests/integration -q -m integration
 ```
 
-As last verified: unit suite **147 passed**; opt-in integration **3 passed**.
+As last verified: unit suite **152 passed**; opt-in integration **3 passed**.
 
 > Invoke pytest with `.\.venv\Scripts\python.exe` if the global interpreter lacks
 > the deps. When capturing results, prefer `> $null 2>&1` to read the true exit

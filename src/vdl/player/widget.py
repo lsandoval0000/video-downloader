@@ -61,6 +61,11 @@ class VideoPlayerWidget(QWidget):
     pause_changed = Signal(bool)
     #: Emitted with the loaded path/URL once media starts loading.
     media_loaded = Signal(str)
+    #: Emitted when the user requests a fullscreen toggle (the transport bar's
+    #: fullscreen button or the ``F`` shortcut). The window that hosts the player
+    #: owns the fullscreen presentation (leaf 10.10): the widget never touches a
+    #: top-level window itself, so its native video surface is never reparented.
+    fullscreen_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None, *, shortcuts: bool = True) -> None:
         super().__init__(parent)
@@ -293,12 +298,15 @@ class VideoPlayerWidget(QWidget):
             self._player.command("cycle", "mute")
 
     def toggle_fullscreen(self) -> None:
-        """Toggle full-screen on the containing top-level window."""
-        window = self.window()
-        if window.isFullScreen():
-            window.showNormal()
-        else:
-            window.showFullScreen()
+        """Request a fullscreen toggle from the window that hosts this player.
+
+        Leaf 10.10: the widget does **not** touch a top-level window itself — that
+        used to fullscreen the whole application and invited a native-surface
+        reparent. It only emits :attr:`fullscreen_requested`;
+        :class:`~vdl.ui.main_window.MainWindow` owns the presentation so the
+        embedded native video surface stays untouched.
+        """
+        self.fullscreen_requested.emit()
 
     # ───────────────────────── shortcuts ─────────────────────────
 

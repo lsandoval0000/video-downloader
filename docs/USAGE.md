@@ -32,11 +32,10 @@ Windows video/audio downloader built on `yt-dlp`, `ffmpeg` and an embedded
 - [10. SponsorBlock removal](#10-sponsorblock-removal)
 - [11. Cookies / browser import](#11-cookies--browser-import)
 - [12. Format conversion](#12-format-conversion)
-- [13. Scheduler](#13-scheduler)
-- [14. History and the download archive](#14-history-and-the-download-archive)
-- [15. Presets](#15-presets)
-- [16. Notifications](#16-notifications)
-- [17. Embedded player (libmpv)](#17-embedded-player-libmpv)
+- [13. History](#13-history)
+- [14. Presets](#14-presets)
+- [15. Notifications](#15-notifications)
+- [16. Embedded player (libmpv)](#16-embedded-player-libmpv)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Where settings and data live](#where-settings-and-data-live)
 
@@ -50,9 +49,9 @@ Windows video/audio downloader built on `yt-dlp`, `ffmpeg` and an embedded
 - **Right (bottom):** the **embedded player** with a transport bar beneath it.
 
 The menu bar / toolbar provide **File** (Add URLs, Open file, Quit), **View**
-(Show player, Reset layout), **History**, **Presets**, **Scheduler**,
-**Settings** (Preferences, Do not disturb, Notify even while focused) and
-**Help** (About). A system-tray icon mirrors the key actions.
+(Show player, Reset layout), **History**, **Presets**, **Settings**
+(Preferences, Do not disturb, Notify even while focused) and **Help** (About).
+A system-tray icon mirrors the key actions.
 
 > _[Screenshot placeholder: `docs/images/00-main-window.png` — the main window.]_
 
@@ -154,9 +153,6 @@ as a distinct status label instead of the percentage, e.g. **Merging**,
 **Extracting audio**, **Converting video**, **Embedding subtitles**,
 **Embedding thumbnail**, **Writing metadata**, **Applying SponsorBlock**.
 
-> The >4 updates/second refresh rate has only been verified in principle
-> (signal path); confirm visually on a live download.
-
 > _[Screenshot placeholder: `docs/images/06-progress.png` — a live download row.]_
 
 ## 7. Clipboard auto-detect
@@ -191,9 +187,11 @@ the fill; prose or multi-URL selections are ignored.
 3. Download.
 
 Embedding works for containers that support it (mp4, mov, m4a, webm, mkv, mka).
-If the requested languages are not available, or the container cannot hold a
-subtitle stream, the app surfaces a message instead of silently producing a file
-with no subtitle track.
+Subtitles are fetched in a **separate pass after the media**, so a subtitle
+problem — a language that is not available, a container that cannot hold a
+subtitle stream, or a caption rate-limit such as YouTube’s `HTTP 429` — is
+**non-fatal**: the media still downloads and finishes, and the subtitle step is
+at most logged as a warning.
 
 > _[Screenshot placeholder: `docs/images/08-subtitles.png` — subtitle options.]_
 
@@ -261,27 +259,7 @@ Incompatible combinations (e.g. audio-only *and* a video container) are rejected
 
 > _[Screenshot placeholder: `docs/images/12-conversion.png` — container + remux.]_
 
-## 13. Scheduler
-
-**Steps**
-
-1. Open **Scheduler → Open scheduler…** (menu or toolbar).
-2. Enter one URL, choose a date/time (defaults to five minutes from now) and a
-   repeat (**Once** or **Daily**).
-3. Click **Schedule**. The item appears in the table with status **Scheduled**.
-4. At the scheduled moment the job is enqueued and runs. Use **Cancel selected**
-   to remove a pending item and **Clear finished** to tidy up.
-
-Scheduled items persist across restarts. A one-shot item whose time passed while
-the app was closed is marked **Missed** on the next launch and is **never** fired
-late; a daily item simply advances to its next occurrence.
-
-> A live firing across a real app restart has **not yet been verified** on a
-> desktop (the due-computation and persistence were verified offscreen).
-
-> _[Screenshot placeholder: `docs/images/13-scheduler.png` — the scheduler dialog.]_
-
-## 14. History and the download archive
+## 13. History
 
 **Steps**
 
@@ -291,16 +269,17 @@ late; a daily item simply advances to its next occurrence.
    - **Open folder** reveals the file’s location.
    - **Refresh** / **Clear history** manage the list (clearing history does not
      delete files).
-3. When you paste a URL that was already downloaded, the URL box shows an
-   *“Already downloaded: …”* hint.
+3. When you paste a URL that was downloaded before, the URL box shows a
+   *“Previously downloaded — will download again: …”* hint. It is informational
+   only: the URL is still queued and downloaded again.
 
-Two stores are involved: `yt-dlp`’s append-only `archive.txt` (what makes
-re-downloads skip) and the SQLite `history.db` (what the table reads). See
+The table is backed by the SQLite `history.db`. There is **no “already
+downloaded” skip** — the same URL always downloads again. See
 [User data & portable mode](../README.md#user-data--portable-mode).
 
-> _[Screenshot placeholder: `docs/images/14-history.png` — the history table.]_
+> _[Screenshot placeholder: `docs/images/13-history.png` — the history table.]_
 
-## 15. Presets
+## 14. Presets
 
 **Steps**
 
@@ -315,9 +294,9 @@ Presets are stored in `config.json` and persist across restarts. A preset
 captures the quality, audio-only, container/remux, subtitle, thumbnail, metadata,
 SponsorBlock, cookie and playlist-range options.
 
-> _[Screenshot placeholder: `docs/images/15-presets.png` — the preset row / dialog.]_
+> _[Screenshot placeholder: `docs/images/14-presets.png` — the preset row / dialog.]_
 
-## 16. Notifications
+## 15. Notifications
 
 **Steps**
 
@@ -331,9 +310,9 @@ SponsorBlock, cookie and playlist-range options.
 > Actual balloon visibility and the click-to-play action have **not yet been
 > verified** on a live desktop (the notification path was verified offscreen).
 
-> _[Screenshot placeholder: `docs/images/16-notification.png` — a tray balloon.]_
+> _[Screenshot placeholder: `docs/images/15-notification.png` — a tray balloon.]_
 
-## 17. Embedded player (libmpv)
+## 16. Embedded player (libmpv)
 
 A finished download plays **inside the app**, in the lower-right pane, with a
 transport bar.
@@ -344,7 +323,11 @@ transport bar.
    queue; a History row; **File → Open file…**; or clicking a completion balloon.
 2. Use the transport bar: **▶ / ⏸**, the seek slider, the time read-out, **mute**,
    the **volume** slider, the **speed** combo (0.5×–2×) and the **fullscreen**
-   button.
+   button (⛶, lower-right).
+3. Click the **fullscreen** button (⛶) — or press `F` — to fullscreen the
+   **video**: the menu bar, toolbar, status bar, download panel and queue are
+   hidden, the transport bar stays visible and usable, and the video fills the
+   screen. Press `Esc` to return to the windowed layout.
 
 The player supports audio/subtitle track selection and loading an external
 subtitle file (used by the app when you play media with sidecar subtitles).
@@ -354,7 +337,11 @@ subtitle file (used by the app when you play media with sidecar subtitles).
 > default video output; it deliberately does **not** force `vo=libmpv` (which
 > does not render into an embedded native window).
 
-> _[Screenshot placeholder: `docs/images/17-player.png` — media playing in-app.]_
+> The video-fills-the-screen visual of fullscreen has **not yet been verified**
+> on a live desktop (the chrome-hiding, transport-visible and `Esc`-to-exit logic
+> was verified offscreen).
+
+> _[Screenshot placeholder: `docs/images/16-player.png` — media playing in-app.]_
 
 ## Keyboard shortcuts
 
@@ -365,8 +352,9 @@ in a text box, so they never hijack text entry:
 |-----|--------|
 | `Space` | Play / pause |
 | `←` / `→` | Seek −5 s / +5 s |
-| `F` | Toggle fullscreen |
+| `F` | Toggle video fullscreen |
 | `M` | Toggle mute |
+| `Esc` | Exit fullscreen (only while fullscreen) |
 
 App-wide: `Ctrl+N` Add URLs, `Ctrl+O` Open file, `Ctrl+,` Preferences,
 `Ctrl+Q` Quit.
