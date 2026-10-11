@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "video-downloader"
+version = "0.1.0"
+description = "Light, portable Windows desktop video downloader — yt-dlp + ffmpeg + embedded libmpv."
+requires-python = ">=3.12,<3.15"
+authors = [{ name = "video-downloader contributors" }]
+# Runtime deps are declared in requirements.txt (single source of truth while
+# scaffolding). Install with:
+#   python -m pip install -r requirements.txt -r requirements-dev.txt
+dependencies = []
+
+[project.scripts]
+video-downloader = "vdl.__main__:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+vdl = ["resources/**/*", "resources/*"]
+
+# ─────────────────────────────── Ruff ───────────────────────────────
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = []
+
+[tool.ruff.lint.flake8-bugbear]
+# dataclass field(...) is a call in an argument default but is the idiomatic,
+# side-effect-free way to express mutable defaults — do not flag it (B008).
+extend-immutable-calls = ["dataclasses.field", "dataclasses.Field"]
+
+# ─────────────────────────────── mypy ───────────────────────────────
+[tool.mypy]
+python_version = "3.12"
+files = ["src"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+ignore_missing_imports = true
+no_implicit_optional = true
+exclude = ["^build/", "^dist/"]
+
+# ────────────────────────────── pytest ──────────────────────────────
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra"
+markers = ["integration: needs network"]

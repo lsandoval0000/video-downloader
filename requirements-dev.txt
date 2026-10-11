@@ -1,0 +1,6 @@
+# Development / build-time dependencies.
+pyinstaller>=6.15
+pytest>=8
+pytest-qt>=4.4
+ruff>=0.6
+mypy>=1.11

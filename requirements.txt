@@ -1,0 +1,6 @@
+# Runtime dependencies (source of truth for the app environment).
+yt-dlp>=2026.8.19
+yt-dlp-ejs>=0.8.0
+mpv==1.0.8
+PySide6-Essentials>=6.12,<6.13
+platformdirs>=4
