@@ -552,3 +552,11 @@ EVIDENCE (`.venv\Scripts\python.exe`):
 - Change: `README.md` `## Not yet verified` → `## Manual verification` (portable run on a Python-free machine; live tray balloons + click-to-play; browser clipboard auto-fill; video fullscreen — all user-confirmed on a real Windows desktop); TOC + intro cross-references repointed. `docs/USAGE.md` (§7 clipboard, §15 notifications, §16 player) + `docs/BUILD.md` portability note updated the same way.
 - Verified: `grep -rin "not yet verified|unverified|not been confirmed|not exercised|has not been done" README.md docs` = ZERO matches. No new claims beyond the user's confirmations.
 - No source/behavior change — docs only (no rebuild needed). Still open: nothing; the 10.1 GUI rows are now user-confirmed.
+
+## [2026-10-11 17:26] builder — 10.13: commit & push docs correction
+- Status: DONE
+- Summary: Committed the 10.13 docs correction and the orchestrator's `.aiw/plan.md`/`.aiw/worklog.md` edits, pushed `master`, then recorded this entry and pushed it so the tree ends CLEAN.
+- Files touched: `.aiw/worklog.md` (this entry); committed `README.md`, `docs/USAGE.md`, `docs/BUILD.md`, `.aiw/plan.md` (pre-existing uncommitted changes from 10.13, not authored by me).
+- Decisions: Staged ONLY the 5 expected paths — no source, no binaries (`dist/`/`vendor/`/`.venv/` stay gitignored per R-002). No `--amend`, no force-push (per task). Two commits so the journal entry itself is also published.
+- Issues: none.
+- Evidence: pre-commit `git status --short` = exactly ` M .aiw/plan.md`, ` M .aiw/worklog.md`, ` M README.md`, ` M docs/BUILD.md`, ` M docs/USAGE.md`; content commit `6e9b0ca` "docs: replace stale 'Not yet verified' with 'Manual verification'" (5 files, +53/−40); push `da2c5c5..6e9b0ca  HEAD -> master`.
