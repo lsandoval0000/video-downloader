@@ -31,6 +31,7 @@ htmlcov/
 !/build/vdl.spec
 !/build/fetch_binaries.ps1
 !/build/rthook_win_dll.py
+!/build/entry_vdl.py
 
 # ───────────────────────────── Runtime data ───────────────────────────
 # Portable-mode user data, logs, archive/history DBs, self-test output, bundles.
