@@ -560,3 +560,11 @@ EVIDENCE (`.venv\Scripts\python.exe`):
 - Decisions: Staged ONLY the 5 expected paths — no source, no binaries (`dist/`/`vendor/`/`.venv/` stay gitignored per R-002). No `--amend`, no force-push (per task). Two commits so the journal entry itself is also published.
 - Issues: none.
 - Evidence: pre-commit `git status --short` = exactly ` M .aiw/plan.md`, ` M .aiw/worklog.md`, ` M README.md`, ` M docs/BUILD.md`, ` M docs/USAGE.md`; content commit `6e9b0ca` "docs: replace stale 'Not yet verified' with 'Manual verification'" (5 files, +53/−40); push `da2c5c5..6e9b0ca  HEAD -> master`.
+
+## [2026-10-12] A.L.L.I.C.E. — PLAN CLOSED (R-017)
+- Status: DONE. The whole task tree is complete; nothing is blocked, nothing is pending.
+- Trigger: the user confirmed "the app is working as intended" and asked whether the plan is closed or still missing something.
+- Findings: all 10 branches are complete — every leaf 1.1 → 10.13 carries a tester sign-off in this journal. The ONLY discrepancies were stale tracking markers in `.aiw/plan.md`: leaves 7.2/7.3/7.4 `[ ]`, branch `2.` and branch `10.` `[~]`, leaf 10.1 `[~]`, six open Success-Criteria boxes, and `> Status: **In progress**` — every one of them contradicted by recorded evidence (frozen bundle built + packaged + pushed, `--selftest` exit 0, 157 unit passed). No `[!]` nodes anywhere; no stray `.aiw/plan-*.md` files (only `plan.md` + `worklog.md`).
+- Approved closure edits (approved by the user in the same turn): tree markers corrected (`7.2`/`7.3`/`7.4` → `[x]`, branch `2.` → `[x]`, branch `10.` → `[x]`, `10.1` → `[x]`); the six Success-Criteria boxes → `[x]` with their evidence recorded inline; `> Status:` → **COMPLETE**. 10.1's acceptance was restated: the frozen-build matrix is satisfied by the on-record automatable-fact evidence plus the user's manual E2E pass (no per-row artifacts), and L3 matrix rows 13 (scheduler) / 14 (already-downloaded skip) are retired because those behaviours were deliberately removed by 10.9 / 10.8. All of it recorded as ruling **R-017**.
+- Residuals accepted, NOT open work: YouTube's global caption rate-limiting (`HTTP 429`) and mid-download `403`s are environmental and not code-fixable; the intermittent `Conversion failed!` abort is fixed (10.12). Documented in `docs/TROUBLESHOOTING.md`.
+- Still open: nothing.
