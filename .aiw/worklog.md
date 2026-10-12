@@ -568,3 +568,11 @@ EVIDENCE (`.venv\Scripts\python.exe`):
 - Approved closure edits (approved by the user in the same turn): tree markers corrected (`7.2`/`7.3`/`7.4` → `[x]`, branch `2.` → `[x]`, branch `10.` → `[x]`, `10.1` → `[x]`); the six Success-Criteria boxes → `[x]` with their evidence recorded inline; `> Status:` → **COMPLETE**. 10.1's acceptance was restated: the frozen-build matrix is satisfied by the on-record automatable-fact evidence plus the user's manual E2E pass (no per-row artifacts), and L3 matrix rows 13 (scheduler) / 14 (already-downloaded skip) are retired because those behaviours were deliberately removed by 10.9 / 10.8. All of it recorded as ruling **R-017**.
 - Residuals accepted, NOT open work: YouTube's global caption rate-limiting (`HTTP 429`) and mid-download `403`s are environmental and not code-fixable; the intermittent `Conversion failed!` abort is fixed (10.12). Documented in `docs/TROUBLESHOOTING.md`.
 - Still open: nothing.
+
+## [2026-10-12 13:39] builder — 10.3: publish plan-closure journal edits to origin/master
+- Status: DONE
+- Summary: Committed the orchestrator's plan-closure edits (`R-017`) and pushed `master`; then recorded this entry and pushed it so the tree ends CLEAN. Housekeeping push only — no feature/source changes.
+- Files touched: `.aiw/plan.md`, `.aiw/worklog.md` (this entry) — committed as-is; no content modified beyond committing.
+- Decisions: Staged ONLY the two `.aiw/` files (pre-commit `git status --short` = exactly ` M .aiw/plan.md` + ` M .aiw/worklog.md`). No `--amend`/`--force`/rebase. Two plain commits on `master` (content + trailing journal) so the journal tip itself is published, matching repo precedent.
+- Issues: none.
+- Evidence: content commit `05851fd` "docs(aiw): close plan (R-017)" (2 files, +24/−15); push `415c557..05851fd  master -> master` (exit 0); `git rev-parse HEAD` == `git rev-parse origin/master` == `05851fd99498368a892547ea40e5c478ea89b669`; `git ls-remote --heads origin master` matches; no binary/large paths tracked (`git ls-tree -r --name-only origin/master` filtered for `*.exe|*.dll|*.zip|*.db|vendor/|dist/|.venv/` → no matches).
